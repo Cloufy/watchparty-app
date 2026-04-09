@@ -3,12 +3,9 @@ FROM node:20-alpine
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm ci --production
+RUN npm install --production
 
 COPY . .
-
-# Seed the database on first build
-RUN node seed.js || true
 
 ENV NODE_ENV=production
 ENV PORT=3000
