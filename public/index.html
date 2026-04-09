@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#7c3aed">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>WatchParty — World Cup 2026</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --purple: #7c3aed;
+      --purple-dark: #6d28d9;
+      --purple-light: #a78bfa;
+      --slate-900: #0f172a;
+      --slate-800: #1e293b;
+      --slate-700: #334155;
+      --slate-600: #475569;
+      --slate-400: #94a3b8;
+      --slate-300: #cbd5e1;
+      --slate-100: #f1f5f9;
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --white: #ffffff;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--slate-900);
+      color: var(--slate-100);
+      min-height: 100vh;
+      min-height: 100dvh;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    #root { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
+
+    /* --- Header --- */
+    .header {
+      background: linear-gradient(135deg, var(--purple-dark), var(--slate-800));
+      padding: 12px 16px;
+      display: flex; align-items: center; gap: 10px;
+      position: sticky; top: 0; z-index: 1000;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+    }
+    .header-logo { font-size: 24px; }
+    .header h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+    .header-sub { font-size: 11px; color: var(--purple-light); font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+
+    /* --- Bottom Nav --- */
+    .bottom-nav {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: var(--slate-800);
+      border-top: 1px solid var(--slate-700);
+      display: flex; z-index: 1000;
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    .nav-item {
+      flex: 1; display: flex; flex-direction: column; align-items: center;
+      padding: 8px 0; gap: 3px; cursor: pointer;
+      color: var(--slate-400); font-size: 10px; font-weight: 600;
+      transition: color 0.2s;
+      border: none; background: none; text-transform: uppercase; letter-spacing: 0.3px;
+    }
+    .nav-item.active { color: var(--purple-light); }
+    .nav-item svg { width: 22px; height: 22px; }
+
+    /* --- Main content --- */
+    .main { flex: 1; padding-bottom: 70px; }
+
+    /* --- Map --- */
+    .map-container { height: 280px; position: relative; }
+    #map { height: 100%; width: 100%; z-index: 1; }
+    .map-overlay {
+      position: absolute; bottom: 12px; left: 12px; right: 12px; z-index: 500;
+      display: flex; gap: 8px;
+    }
+    .map-chip {
+      background: var(--slate-800); color: var(--slate-100);
+      padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
+      border: 1px solid var(--slate-600); cursor: pointer; white-space: nowrap;
+      transition: all 0.2s;
+    }
+    .map-chip.active { background: var(--purple); border-color: var(--purple); }
+
+    /* --- Cards --- */
+    .card {
+      background: var(--slate-800); border-radius: 12px; padding: 16px;
+      margin: 8px 12px; border: 1px solid var(--slate-700);
+      cursor: pointer; transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .card:active { transform: scale(0.98); }
+    .card-title { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+    .card-subtitle { font-size: 12px; color: var(--slate-400); margin-bottom: 8px; }
+    .card-meta { display: flex; gap: 12px; flex-wrap: wrap; }
+    .card-meta span { font-size: 11px; color: var(--slate-300); display: flex; align-items: center; gap: 4px; }
+
+    /* --- Tags --- */
+    .tag {
+      display: inline-block; padding: 3px 8px; border-radius: 6px;
+      font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+    }
+    .tag-purple { background: rgba(124,58,237,0.2); color: var(--purple-light); }
+    .tag-green { background: rgba(34,197,94,0.15); color: var(--green); }
+    .tag-amber { background: rgba(245,158,11,0.15); color: var(--amber); }
+
+    /* --- Match card --- */
+    .match-card {
+      background: var(--slate-800); border-radius: 12px; padding: 14px 16px;
+      margin: 6px 12px; border: 1px solid var(--slate-700); cursor: pointer;
+    }
+    .match-teams {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 15px; font-weight: 700;
+    }
+    .match-teams .vs { color: var(--slate-600); font-size: 12px; font-weight: 400; }
+    .match-flag { font-size: 20px; }
+    .match-time { font-size: 11px; color: var(--purple-light); margin-top: 6px; text-align: center; }
+    .match-stage { font-size: 10px; color: var(--slate-400); text-align: center; }
+
+    /* --- Section headers --- */
+    .section-header {
+      padding: 16px 16px 8px;
+      font-size: 13px; font-weight: 700; color: var(--slate-400);
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .date-header {
+      padding: 12px 16px 4px;
+      font-size: 14px; font-weight: 700; color: var(--purple-light);
+    }
+
+    /* --- Detail view --- */
+    .detail-header {
+      background: linear-gradient(135deg, var(--purple-dark), var(--slate-800));
+      padding: 16px; padding-top: 8px;
+    }
+    .back-btn {
+      background: none; border: none; color: var(--purple-light);
+      font-size: 14px; cursor: pointer; padding: 8px 0; display: flex; align-items: center; gap: 4px;
+    }
+    .detail-title { font-size: 20px; font-weight: 800; margin-top: 8px; }
+    .detail-subtitle { font-size: 13px; color: var(--slate-300); margin-top: 4px; }
+    .detail-section { padding: 16px; }
+    .detail-section h3 { font-size: 14px; font-weight: 700; color: var(--purple-light); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.3px; }
+    .detail-row { display: flex; gap: 8px; margin-bottom: 10px; font-size: 13px; color: var(--slate-300); }
+    .detail-row .label { color: var(--slate-400); min-width: 80px; font-weight: 600; }
+
+    /* --- RSVP button --- */
+    .rsvp-btn {
+      background: var(--purple); color: white; border: none;
+      padding: 14px 24px; border-radius: 12px; font-size: 15px; font-weight: 700;
+      width: calc(100% - 32px); margin: 8px 16px;
+      cursor: pointer; transition: background 0.2s;
+    }
+    .rsvp-btn:active { background: var(--purple-dark); }
+    .rsvp-btn:disabled { background: var(--slate-600); cursor: not-allowed; }
+
+    /* --- RSVP form --- */
+    .rsvp-form { padding: 16px; }
+    .rsvp-form input {
+      width: 100%; padding: 12px; border-radius: 8px;
+      background: var(--slate-700); border: 1px solid var(--slate-600);
+      color: var(--slate-100); font-size: 14px; margin-bottom: 10px;
+    }
+    .rsvp-form input::placeholder { color: var(--slate-400); }
+
+    /* --- Filter bar --- */
+    .filter-bar {
+      display: flex; gap: 8px; padding: 10px 12px;
+      overflow-x: auto; -webkit-overflow-scrolling: touch;
+    }
+    .filter-bar::-webkit-scrollbar { display: none; }
+    .filter-chip {
+      flex-shrink: 0; padding: 7px 14px; border-radius: 20px;
+      background: var(--slate-800); border: 1px solid var(--slate-700);
+      color: var(--slate-300); font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .filter-chip.active { background: var(--purple); border-color: var(--purple); color: white; }
+
+    /* --- Empty state --- */
+    .empty-state {
+      text-align: center; padding: 40px 20px; color: var(--slate-400);
+    }
+    .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+    .empty-state p { font-size: 14px; }
+
+    /* --- Loading --- */
+    .loading { text-align: center; padding: 30px; color: var(--slate-400); }
+    .spinner {
+      width: 24px; height: 24px; border: 3px solid var(--slate-600);
+      border-top-color: var(--purple); border-radius: 50%;
+      animation: spin 0.8s linear infinite; margin: 0 auto 10px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* --- Search bar --- */
+    .search-bar {
+      margin: 10px 12px; padding: 10px 14px; border-radius: 10px;
+      background: var(--slate-800); border: 1px solid var(--slate-700);
+      color: var(--slate-100); font-size: 14px; width: calc(100% - 24px);
+    }
+    .search-bar::placeholder { color: var(--slate-400); }
+
+    /* --- Atmosphere tags --- */
+    .atmosphere-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .atmo-tag {
+      font-size: 10px; padding: 3px 8px; border-radius: 6px;
+      background: rgba(124,58,237,0.1); color: var(--purple-light);
+      border: 1px solid rgba(124,58,237,0.2);
+    }
+
+    /* --- Toast --- */
+    .toast {
+      position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+      background: var(--green); color: white; padding: 12px 24px;
+      border-radius: 10px; font-size: 14px; font-weight: 600;
+      z-index: 2000; animation: fadeInUp 0.3s ease;
+    }
+    @keyframes fadeInUp { from { opacity: 0; transform: translateX(-50%) translateY(10px); } }
+
+    /* --- Offline banner --- */
+    .offline-banner {
+      background: var(--red); color: white; text-align: center;
+      padding: 6px 16px; font-size: 12px; font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" src="/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js');
+    }
+  </script>
+</body>
+</html>

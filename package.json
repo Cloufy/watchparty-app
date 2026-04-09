@@ -1,0 +1,15 @@
+{
+  "name": "watchparty-app",
+  "version": "1.0.0",
+  "description": "World Cup 2026 Watch Party Finder — Miami Proof of Concept",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node seed.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "sql.js": "^1.10.0"
+  }
+}
