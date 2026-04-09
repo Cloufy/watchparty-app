@@ -867,6 +867,7 @@ app.post('/api/venues/bulk', (req, res, next) => {
 
     let imported = 0;
     let skipped = 0;
+    let enriched = 0;
 
     for (const v of venues) {
       if (!v.name || !v.type || !v.address || !v.city || v.lat == null || v.lng == null) {
@@ -874,9 +875,39 @@ app.post('/api/venues/bulk', (req, res, next) => {
         continue;
       }
 
-      const existing = queryOne('SELECT id FROM venues WHERE name = ? AND city = ?', [v.name, v.city]);
+      // Case-insensitive name match OR coordinate proximity (same physical location)
+      const existing = queryOne(
+        `SELECT id, phone, website, description, atmosphere, capacity, image_url, source FROM venues
+         WHERE (LOWER(name) = LOWER(?) AND city = ?)
+            OR (ABS(lat - ?) < 0.0005 AND ABS(lng - ?) < 0.0005)`,
+        [v.name, v.city, parseFloat(v.lat), parseFloat(v.lng)]
+      );
+
       if (existing) {
-        skipped++;
+        // Cross-source enrichment: fill in null/empty fields from new data
+        const updates = [];
+        const params = [];
+        const fieldsToEnrich = [
+          ['phone', v.phone], ['website', v.website], ['description', v.description],
+          ['atmosphere', v.atmosphere], ['image_url', v.image_url],
+        ];
+        for (const [col, val] of fieldsToEnrich) {
+          if (val && !existing[col]) {
+            updates.push(`${col} = ?`);
+            params.push(val);
+          }
+        }
+        if (v.capacity && !existing.capacity) {
+          updates.push('capacity = ?');
+          params.push(parseInt(v.capacity));
+        }
+        if (updates.length > 0) {
+          params.push(existing.id);
+          execute(`UPDATE venues SET ${updates.join(', ')} WHERE id = ?`, params);
+          enriched++;
+        } else {
+          skipped++;
+        }
         continue;
       }
 
@@ -894,7 +925,8 @@ app.post('/api/venues/bulk', (req, res, next) => {
       success: true,
       imported,
       skipped,
-      message: `Imported ${imported} venues, skipped ${skipped}`,
+      enriched,
+      message: `Imported ${imported} venues, enriched ${enriched}, skipped ${skipped}`,
     });
   } catch (error) {
     next(error);

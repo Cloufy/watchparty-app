@@ -7,6 +7,9 @@
  * Usage:
  *   GOOGLE_API_KEY=your_key node scripts/scrape-google.js
  *   GOOGLE_API_KEY=your_key node scripts/scrape-google.js --city miami
+ *   GOOGLE_API_KEY=your_key node scripts/scrape-google.js --enrich             # fetch phone/website via Details API
+ *   GOOGLE_API_KEY=your_key node scripts/scrape-google.js --enrich --max-details 100
+ *   GOOGLE_API_KEY=your_key node scripts/scrape-google.js --min-rating 3.5 --min-reviews 20
  *   GOOGLE_API_KEY=your_key node scripts/scrape-google.js --import --server https://watchparty-app-production.up.railway.app
  */
 
@@ -119,6 +122,76 @@ function estimateCapacity(place) {
 }
 
 /**
+ * Fetch Place Details (phone, website, hours) for a single place
+ */
+async function fetchPlaceDetails(placeId) {
+  const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=formatted_phone_number,website,opening_hours&key=${API_KEY}`;
+  const data = await fetch(url);
+  if (data.status !== 'OK') return {};
+  const result = data.result || {};
+  return {
+    phone: result.formatted_phone_number || null,
+    website: result.website || null,
+    hours: result.opening_hours?.weekday_text?.join('; ') || null,
+  };
+}
+
+/**
+ * Enrich venues with Place Details API data (phone, website)
+ */
+async function enrichVenues(venues, maxDetails) {
+  const toEnrich = venues.slice(0, maxDetails);
+  console.log(`\nEnriching ${toEnrich.length} venues via Place Details API (~$${(toEnrich.length * 0.017).toFixed(2)} estimated cost)...`);
+  let enriched = 0;
+  for (const v of toEnrich) {
+    if (!v._place_id) continue;
+    try {
+      const details = await fetchPlaceDetails(v._place_id);
+      if (details.phone) v.phone = details.phone;
+      if (details.website) v.website = details.website;
+      enriched++;
+      // Rate limit
+      await new Promise(r => setTimeout(r, 200));
+    } catch (err) {
+      console.error(`  Details error for ${v.name}: ${err.message}`);
+    }
+  }
+  console.log(`  Enriched ${enriched} venues with phone/website data`);
+}
+
+/**
+ * Filter out low-quality and duplicate chain venues
+ */
+function filterQuality(venues, minRating, minReviews) {
+  // Remove low-quality venues
+  let filtered = venues.filter(v => {
+    if (v._rating && v._rating < minRating) return false;
+    if (v._review_count != null && v._review_count < minReviews) return false;
+    return true;
+  });
+
+  // Deduplicate chains: keep only the highest-rated per chain name per city
+  const chainNames = new Map(); // "chain_name:city" -> best venue
+  const nonChain = [];
+  const chainPatterns = /^(buffalo wild wings|hooters|applebee|chili'?s|tgi friday|dave & buster|twin peaks|walk-?on'?s|miller'?s ale house)/i;
+
+  for (const v of filtered) {
+    const match = v.name.match(chainPatterns);
+    if (match) {
+      const key = `${match[1].toLowerCase()}:${v.city}`;
+      const existing = chainNames.get(key);
+      if (!existing || (v._rating || 0) > (existing._rating || 0)) {
+        chainNames.set(key, v);
+      }
+    } else {
+      nonChain.push(v);
+    }
+  }
+
+  return [...nonChain, ...chainNames.values()];
+}
+
+/**
  * POST venues to the server
  */
 function importVenues(venues, serverUrl) {
@@ -161,8 +234,12 @@ async function main() {
 
   const args = process.argv.slice(2);
   const doImport = args.includes('--import');
+  const doEnrich = args.includes('--enrich');
   const serverUrl = args.includes('--server') ? args[args.indexOf('--server') + 1] : 'http://localhost:3000';
   const cityArg = args.includes('--city') ? args[args.indexOf('--city') + 1].toLowerCase() : null;
+  const maxDetails = args.includes('--max-details') ? parseInt(args[args.indexOf('--max-details') + 1]) : 200;
+  const minRating = args.includes('--min-rating') ? parseFloat(args[args.indexOf('--min-rating') + 1]) : 3.0;
+  const minReviews = args.includes('--min-reviews') ? parseInt(args[args.indexOf('--min-reviews') + 1]) : 10;
 
   const citiesToScrape = cityArg ? { [cityArg]: CITIES[cityArg] } : CITIES;
   if (cityArg && !CITIES[cityArg]) {
@@ -180,8 +257,10 @@ async function main() {
       try {
         const venues = await searchPlaces(query, city);
         for (const v of venues) {
-          if (!cityVenues.has(v.name.toLowerCase())) {
-            cityVenues.set(v.name.toLowerCase(), v);
+          const k = v.name.toLowerCase();
+          // Keep the one with better rating if duplicate
+          if (!cityVenues.has(k) || (v._rating || 0) > (cityVenues.get(k)._rating || 0)) {
+            cityVenues.set(k, v);
           }
         }
         // Respect rate limits
@@ -196,10 +275,20 @@ async function main() {
     allVenues = allVenues.concat(unique);
   }
 
+  // Quality filtering
+  const beforeFilter = allVenues.length;
+  allVenues = filterQuality(allVenues, minRating, minReviews);
+  console.log(`\nQuality filter: ${beforeFilter} -> ${allVenues.length} venues (min rating: ${minRating}, min reviews: ${minReviews})`);
+
   // Sort by rating (best first)
   allVenues.sort((a, b) => (b._rating || 0) - (a._rating || 0));
 
-  console.log(`\nTotal: ${allVenues.length} venues`);
+  console.log(`Total: ${allVenues.length} venues`);
+
+  // Enrich with Place Details API if requested
+  if (doEnrich && allVenues.length > 0) {
+    await enrichVenues(allVenues, maxDetails);
+  }
 
   if (doImport && allVenues.length > 0) {
     console.log(`\nImporting to ${serverUrl}...`);

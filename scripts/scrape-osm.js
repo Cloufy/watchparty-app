@@ -7,6 +7,8 @@
  * Usage:
  *   node scripts/scrape-osm.js                    # scrape all cities, output JSON
  *   node scripts/scrape-osm.js --city miami       # scrape one city
+ *   node scripts/scrape-osm.js --min-score 30     # only venues with relevance >= 30
+ *   node scripts/scrape-osm.js --skip-geocode     # skip Nominatim reverse geocoding
  *   node scripts/scrape-osm.js --import           # scrape and POST to local server
  *   node scripts/scrape-osm.js --import --server https://watchparty-app-production.up.railway.app
  */
@@ -32,25 +34,51 @@ const CITIES = {
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 
 /**
- * Build Overpass QL query for sports bars/pubs in a bounding box
+ * Build Overpass QL query for bars/pubs in a bounding box
+ * Fetches all bars and pubs — relevance scoring happens post-fetch
  */
 function buildQuery(bbox) {
   const [south, west, north, east] = bbox;
+  const b = `(${south},${west},${north},${east})`;
   return `
-    [out:json][timeout:30];
+    [out:json][timeout:45];
     (
-      node["amenity"="bar"]["sport"~"."](${south},${west},${north},${east});
-      node["amenity"="pub"]["sport"~"."](${south},${west},${north},${east});
-      node["amenity"="bar"]["name"~"sport|Sports|soccer|football|futbol|Goal|Stadium|Athletic",i](${south},${west},${north},${east});
-      node["amenity"="pub"]["name"~"sport|Sports|soccer|football|futbol|Goal|Stadium|Athletic",i](${south},${west},${north},${east});
-      node["amenity"="bar"]["description"~"sport|screen|TV|watch|game",i](${south},${west},${north},${east});
-      node["amenity"="pub"](${south},${west},${north},${east});
-      node["amenity"="bar"]["real_ale"~"."](${south},${west},${north},${east});
-      node["leisure"="sports_centre"]["name"~"bar|pub|grill|tavern",i](${south},${west},${north},${east});
+      node["amenity"="bar"]${b};
+      node["amenity"="pub"]${b};
+      node["amenity"="restaurant"]["cuisine"~"american|burger|wings|grill",i]${b};
+      node["leisure"="sports_centre"]["name"~"bar|pub|grill|tavern",i]${b};
+      way["amenity"="bar"]${b};
+      way["amenity"="pub"]${b};
     );
-    out body;
+    out body center;
   `;
 }
+
+/**
+ * Score a venue's relevance for sports/World Cup watching (0-100)
+ */
+function scoreRelevance(tags) {
+  let score = 20; // base score for being a bar/pub
+  const name = (tags.name || '').toLowerCase();
+  const desc = (tags.description || '').toLowerCase();
+
+  // Strong sports signals
+  if (tags.sport) score += 40;
+  if (/sport|soccer|football|futbol|goal|stadium|athletic|pitch/i.test(name)) score += 35;
+  if (/sport|screen|tv|watch|game|match/i.test(desc)) score += 25;
+
+  // Medium signals
+  if (tags['sport:tv'] === 'yes' || tags.television === 'yes') score += 30;
+  if (tags.real_ale) score += 10;
+  if (tags.outdoor_seating === 'yes' || tags.beer_garden === 'yes') score += 5;
+
+  // Pub bonus (pubs are more likely to show sports)
+  if (tags.amenity === 'pub') score += 10;
+
+  return Math.min(score, 100);
+}
+
+const MIN_RELEVANCE_SCORE = 20; // Include all bars/pubs by default
 
 /**
  * Fetch data from Overpass API
@@ -87,11 +115,15 @@ function fetchOverpass(query) {
 }
 
 /**
- * Convert OSM node to our venue format
+ * Convert OSM element (node or way with center) to our venue format
  */
-function osmToVenue(node, cityName) {
-  const tags = node.tags || {};
+function osmToVenue(el, cityName) {
+  const tags = el.tags || {};
   const name = tags.name || tags['name:en'] || 'Unknown Venue';
+
+  // Handle both nodes (lat/lon) and ways (center.lat/center.lon)
+  const lat = el.lat || (el.center && el.center.lat);
+  const lng = el.lon || (el.center && el.center.lon);
 
   // Determine venue type
   let type = 'bar';
@@ -100,8 +132,8 @@ function osmToVenue(node, cityName) {
   if (tags.leisure === 'sports_centre') type = 'fan_zone';
   if (tags.beer_garden === 'yes' || tags.outdoor_seating === 'yes') type = 'outdoor';
 
-  // Build address
-  const address = [tags['addr:housenumber'], tags['addr:street'], tags['addr:city']].filter(Boolean).join(' ') || `${cityName} area`;
+  // Build address from OSM tags (may be incomplete — Nominatim fills gaps later)
+  const address = [tags['addr:housenumber'], tags['addr:street'], tags['addr:city']].filter(Boolean).join(' ') || '';
 
   // Build atmosphere from tags
   const atmoTags = [];
@@ -112,13 +144,15 @@ function osmToVenue(node, cityName) {
   if (tags.live_music === 'yes') atmoTags.push('Live Music');
   if (tags.food === 'yes' || tags.cuisine) atmoTags.push('Food');
 
+  const relevance = scoreRelevance(tags);
+
   return {
     name,
     type,
     address,
     city: cityName,
-    lat: node.lat,
-    lng: node.lon,
+    lat,
+    lng,
     phone: tags.phone || tags['contact:phone'] || null,
     website: tags.website || tags['contact:website'] || null,
     description: tags.description || `${name} — a ${tags.amenity || 'venue'} in ${cityName}`,
@@ -130,7 +164,60 @@ function osmToVenue(node, cityName) {
     image_url: null,
     source: 'openstreetmap',
     submitted_by: 'osm-scraper',
+    _relevance: relevance,
   };
+}
+
+/**
+ * Reverse geocode coordinates via Nominatim to get a street address
+ * Rate limited: 1 request/second per Nominatim usage policy
+ */
+function reverseGeocode(lat, lng) {
+  return new Promise((resolve, reject) => {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
+    https.get(url, {
+      headers: { 'User-Agent': 'WatchPartyApp/1.0 (venue scraper)' },
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          const result = JSON.parse(data);
+          const addr = result.address || {};
+          const parts = [
+            addr.house_number,
+            addr.road,
+            addr.city || addr.town || addr.village,
+            addr.state,
+          ].filter(Boolean);
+          resolve(parts.join(', ') || result.display_name || '');
+        } catch (e) {
+          resolve('');
+        }
+      });
+    }).on('error', () => resolve(''));
+  });
+}
+
+/**
+ * Batch reverse-geocode venues that have no address
+ */
+async function fillMissingAddresses(venues, cityName) {
+  const needsAddress = venues.filter(v => !v.address);
+  if (needsAddress.length === 0) return;
+
+  console.log(`  Reverse geocoding ${needsAddress.length} venues missing addresses...`);
+  for (const v of needsAddress) {
+    try {
+      const addr = await reverseGeocode(v.lat, v.lng);
+      if (addr) v.address = addr;
+      else v.address = `${cityName} area`;
+    } catch (e) {
+      v.address = `${cityName} area`;
+    }
+    // Nominatim rate limit: 1 req/sec
+    await new Promise(r => setTimeout(r, 1100));
+  }
 }
 
 /**
@@ -180,6 +267,8 @@ async function main() {
   // Filter to specific city if requested
   const cityArg = args.includes('--city') ? args[args.indexOf('--city') + 1].toLowerCase() : null;
   const citiesToScrape = cityArg ? { [cityArg]: CITIES[cityArg] } : CITIES;
+  const minScore = args.includes('--min-score') ? parseInt(args[args.indexOf('--min-score') + 1]) : MIN_RELEVANCE_SCORE;
+  const skipGeocode = args.includes('--skip-geocode');
 
   if (cityArg && !CITIES[cityArg]) {
     console.error(`Unknown city: ${cityArg}. Available: ${Object.keys(CITIES).join(', ')}`);
@@ -195,19 +284,34 @@ async function main() {
       const result = await fetchOverpass(query);
 
       const venues = (result.elements || [])
-        .filter((el) => el.tags && el.tags.name) // Skip unnamed nodes
-        .map((el) => osmToVenue(el, city.name));
+        .filter((el) => el.tags && el.tags.name) // Skip unnamed venues
+        .map((el) => osmToVenue(el, city.name))
+        .filter((v) => v.lat && v.lng) // Must have coordinates
+        .filter((v) => v._relevance >= minScore); // Relevance filter
 
-      // Deduplicate by name
-      const seen = new Set();
-      const unique = venues.filter((v) => {
-        const key = v.name.toLowerCase();
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
+      // Deduplicate by name (case-insensitive), keep highest relevance
+      const byName = new Map();
+      for (const v of venues) {
+        const k = v.name.toLowerCase();
+        if (!byName.has(k) || v._relevance > byName.get(k)._relevance) {
+          byName.set(k, v);
+        }
+      }
+      const unique = Array.from(byName.values());
 
-      console.log(`  Found ${result.elements?.length || 0} nodes -> ${unique.length} unique venues`);
+      // Sort by relevance (most relevant first)
+      unique.sort((a, b) => b._relevance - a._relevance);
+
+      console.log(`  Found ${result.elements?.length || 0} elements -> ${venues.length} named -> ${unique.length} unique (min score: ${minScore})`);
+
+      // Fill missing addresses via Nominatim reverse geocoding
+      if (!skipGeocode) {
+        await fillMissingAddresses(unique, city.name);
+      } else {
+        // Set placeholder for venues without addresses
+        unique.forEach(v => { if (!v.address) v.address = `${city.name} area`; });
+      }
+
       allVenues = allVenues.concat(unique);
 
       // Rate limit: Overpass asks for 1 request per second
