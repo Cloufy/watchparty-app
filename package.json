@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "seed": "node seed.js"
+    "seed": "node seed.js",
+    "scrape:osm": "node scripts/scrape-osm.js",
+    "scrape:google": "node scripts/scrape-google.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -43,7 +43,15 @@ async function initializeDatabase() {
       console.log('✓ Created new database');
     }
 
-    // Create schema
+    // Migrate existing databases: add new columns before schema creation
+    // (ALTER TABLE is a no-op if the column already exists — we catch the error)
+    try { db.run("SELECT status FROM venues LIMIT 1"); } catch (e) {
+      try { db.run("ALTER TABLE venues ADD COLUMN status TEXT DEFAULT 'approved'"); } catch (e2) {}
+      try { db.run("ALTER TABLE venues ADD COLUMN source TEXT DEFAULT 'seed'"); } catch (e2) {}
+      try { db.run("ALTER TABLE venues ADD COLUMN submitted_by TEXT"); } catch (e2) {}
+    }
+
+    // Create schema (includes new columns for fresh databases)
     createSchema();
 
     // Check if teams table is empty and seed if necessary
@@ -113,6 +121,9 @@ function createSchema() {
       has_food INTEGER DEFAULT 1,
       drink_specials TEXT,
       image_url TEXT,
+      status TEXT DEFAULT 'approved',
+      source TEXT DEFAULT 'seed',
+      submitted_by TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -146,6 +157,7 @@ function createSchema() {
     CREATE INDEX IF NOT EXISTS idx_matches_stage ON matches(stage);
     CREATE INDEX IF NOT EXISTS idx_venues_city ON venues(city);
     CREATE INDEX IF NOT EXISTS idx_venues_type ON venues(type);
+    CREATE INDEX IF NOT EXISTS idx_venues_status ON venues(status);
     CREATE INDEX IF NOT EXISTS idx_events_venue ON events(venue_id);
     CREATE INDEX IF NOT EXISTS idx_events_match ON events(match_id);
     CREATE INDEX IF NOT EXISTS idx_rsvps_event ON rsvps(event_id);
@@ -413,7 +425,7 @@ app.get('/api/venues', (req, res, next) => {
     let query = `
       SELECT DISTINCT v.*
       FROM venues v
-      WHERE 1=1
+      WHERE v.status = 'approved'
     `;
     const params = [];
 
@@ -783,6 +795,283 @@ app.get('/api/schedule', (req, res, next) => {
   }
 });
 
+// ==================== VENUE SUBMISSION ====================
+
+/**
+ * POST /api/venues
+ * Submit a new venue (status: pending until admin approves)
+ * Body: { name, type, address, city, lat, lng, phone?, website?, description?, atmosphere?, capacity?, has_outdoor?, has_food?, drink_specials?, submitted_by? }
+ */
+app.post('/api/venues', (req, res, next) => {
+  try {
+    const { name, type, address, city, lat, lng, phone, website, description, atmosphere, capacity, has_outdoor, has_food, drink_specials, submitted_by, image_url, source } = req.body;
+
+    if (!name || !type || !address || !city || lat == null || lng == null) {
+      return res.status(400).json({
+        success: false,
+        error: 'Required fields: name, type, address, city, lat, lng',
+      });
+    }
+
+    const validTypes = ['bar', 'restaurant', 'fan_zone', 'outdoor', 'other'];
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid type. Must be one of: ${validTypes.join(', ')}`,
+      });
+    }
+
+    // Check for duplicate (same name + city)
+    const existing = queryOne('SELECT id FROM venues WHERE name = ? AND city = ?', [name, city]);
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        error: 'A venue with this name already exists in this city',
+        existing_id: existing.id,
+      });
+    }
+
+    const venueStatus = source === 'scraper' ? 'pending' : 'pending';
+
+    execute(
+      `INSERT INTO venues (name, type, address, city, lat, lng, phone, website, description, atmosphere, capacity, has_outdoor, has_food, drink_specials, image_url, status, source, submitted_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      [name, type, address, city, parseFloat(lat), parseFloat(lng), phone || null, website || null, description || null, atmosphere || null, capacity ? parseInt(capacity) : null, has_outdoor ? 1 : 0, has_food !== false ? 1 : 0, drink_specials || null, image_url || null, venueStatus, source || 'user', submitted_by || null]
+    );
+
+    saveDatabase();
+
+    const venue = queryOne('SELECT * FROM venues WHERE name = ? AND city = ? ORDER BY id DESC LIMIT 1', [name, city]);
+
+    res.status(201).json({
+      success: true,
+      data: venue,
+      message: 'Venue submitted for review',
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/venues/bulk
+ * Bulk import venues (for scrapers)
+ * Body: { venues: [{ name, type, address, city, lat, lng, ... }] }
+ */
+app.post('/api/venues/bulk', (req, res, next) => {
+  try {
+    const { venues } = req.body;
+    if (!Array.isArray(venues) || venues.length === 0) {
+      return res.status(400).json({ success: false, error: 'venues array is required' });
+    }
+
+    let imported = 0;
+    let skipped = 0;
+
+    for (const v of venues) {
+      if (!v.name || !v.type || !v.address || !v.city || v.lat == null || v.lng == null) {
+        skipped++;
+        continue;
+      }
+
+      const existing = queryOne('SELECT id FROM venues WHERE name = ? AND city = ?', [v.name, v.city]);
+      if (existing) {
+        skipped++;
+        continue;
+      }
+
+      execute(
+        `INSERT INTO venues (name, type, address, city, lat, lng, phone, website, description, atmosphere, capacity, has_outdoor, has_food, drink_specials, image_url, status, source, submitted_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, CURRENT_TIMESTAMP)`,
+        [v.name, v.type, v.address, v.city, parseFloat(v.lat), parseFloat(v.lng), v.phone || null, v.website || null, v.description || null, v.atmosphere || null, v.capacity ? parseInt(v.capacity) : null, v.has_outdoor ? 1 : 0, v.has_food !== false ? 1 : 0, v.drink_specials || null, v.image_url || null, v.source || 'scraper', v.submitted_by || null]
+      );
+      imported++;
+    }
+
+    saveDatabase();
+
+    res.status(201).json({
+      success: true,
+      imported,
+      skipped,
+      message: `Imported ${imported} venues, skipped ${skipped}`,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ==================== EVENT CREATION ====================
+
+/**
+ * POST /api/events
+ * Create a new watch party event
+ * Body: { venue_id, match_id?, title, description?, team_affiliation?, organizer_name, max_capacity? }
+ */
+app.post('/api/events', (req, res, next) => {
+  try {
+    const { venue_id, match_id, title, description, team_affiliation, organizer_name, max_capacity } = req.body;
+
+    if (!venue_id || !title || !organizer_name) {
+      return res.status(400).json({
+        success: false,
+        error: 'Required fields: venue_id, title, organizer_name',
+      });
+    }
+
+    // Verify venue exists and is approved
+    const venue = queryOne('SELECT id, status FROM venues WHERE id = ?', [venue_id]);
+    if (!venue) {
+      return res.status(404).json({ success: false, error: 'Venue not found' });
+    }
+    if (venue.status !== 'approved') {
+      return res.status(400).json({ success: false, error: 'Venue is not yet approved' });
+    }
+
+    // Verify match exists if provided
+    if (match_id) {
+      const match = queryOne('SELECT id FROM matches WHERE id = ?', [match_id]);
+      if (!match) {
+        return res.status(404).json({ success: false, error: 'Match not found' });
+      }
+    }
+
+    execute(
+      `INSERT INTO events (venue_id, match_id, title, description, team_affiliation, organizer_name, max_capacity, rsvp_count, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)`,
+      [venue_id, match_id || null, title, description || null, team_affiliation || null, organizer_name, max_capacity ? parseInt(max_capacity) : null]
+    );
+
+    saveDatabase();
+
+    const event = queryOne('SELECT * FROM events WHERE venue_id = ? AND title = ? ORDER BY id DESC LIMIT 1', [venue_id, title]);
+
+    res.status(201).json({
+      success: true,
+      data: event,
+      message: 'Watch party event created',
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ==================== ADMIN ENDPOINTS ====================
+
+/**
+ * GET /api/admin/venues
+ * List venues filtered by status (for admin review)
+ * Query: status (pending|approved|rejected), city
+ */
+app.get('/api/admin/venues', (req, res, next) => {
+  try {
+    const { status = 'pending', city } = req.query;
+    let query = 'SELECT * FROM venues WHERE status = ?';
+    const params = [status];
+
+    if (city) {
+      query += ' AND city = ?';
+      params.push(city);
+    }
+
+    query += ' ORDER BY created_at DESC';
+    const venues = queryAll(query, params);
+
+    res.json({ success: true, data: venues, count: venues.length });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/admin/stats
+ * Dashboard stats
+ */
+app.get('/api/admin/stats', (req, res, next) => {
+  try {
+    const pending = queryOne("SELECT COUNT(*) as count FROM venues WHERE status = 'pending'");
+    const approved = queryOne("SELECT COUNT(*) as count FROM venues WHERE status = 'approved'");
+    const rejected = queryOne("SELECT COUNT(*) as count FROM venues WHERE status = 'rejected'");
+    const events = queryOne('SELECT COUNT(*) as count FROM events');
+    const rsvps = queryOne('SELECT COUNT(*) as count FROM rsvps');
+
+    const cityCounts = queryAll("SELECT city, COUNT(*) as count FROM venues WHERE status = 'approved' GROUP BY city ORDER BY count DESC");
+
+    res.json({
+      success: true,
+      data: {
+        venues: { pending: pending.count, approved: approved.count, rejected: rejected.count },
+        events: events.count,
+        rsvps: rsvps.count,
+        cities: cityCounts,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PUT /api/admin/venues/:id/approve
+ * Approve a pending venue
+ */
+app.put('/api/admin/venues/:id/approve', (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const venue = queryOne('SELECT * FROM venues WHERE id = ?', [id]);
+    if (!venue) return res.status(404).json({ success: false, error: 'Venue not found' });
+
+    execute("UPDATE venues SET status = 'approved' WHERE id = ?", [id]);
+    saveDatabase();
+
+    res.json({ success: true, message: `${venue.name} approved`, data: { ...venue, status: 'approved' } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PUT /api/admin/venues/:id/reject
+ * Reject a pending venue
+ */
+app.put('/api/admin/venues/:id/reject', (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const venue = queryOne('SELECT * FROM venues WHERE id = ?', [id]);
+    if (!venue) return res.status(404).json({ success: false, error: 'Venue not found' });
+
+    execute("UPDATE venues SET status = 'rejected' WHERE id = ?", [id]);
+    saveDatabase();
+
+    res.json({ success: true, message: `${venue.name} rejected`, data: { ...venue, status: 'rejected' } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PUT /api/admin/venues/approve-all
+ * Approve all pending venues (bulk action)
+ */
+app.put('/api/admin/venues/approve-all', (req, res, next) => {
+  try {
+    const { city } = req.query;
+    let query = "UPDATE venues SET status = 'approved' WHERE status = 'pending'";
+    const params = [];
+    if (city) {
+      query += ' AND city = ?';
+      params.push(city);
+    }
+    execute(query, params);
+    saveDatabase();
+
+    const count = queryOne("SELECT changes() as count");
+    res.json({ success: true, message: `Approved ${count.count} venues` });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ==================== HEALTH CHECK ====================
 
 /**
@@ -794,6 +1083,12 @@ app.get('/health', (req, res) => {
     status: 'OK',
     timestamp: new Date().toISOString(),
   });
+});
+
+// ==================== ADMIN PAGE ====================
+
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
 // ==================== SPA FALLBACK ====================

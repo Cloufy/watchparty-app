@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WatchParty Admin</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --purple: #7c3aed; --purple-dark: #6d28d9; --purple-light: #a78bfa;
+      --slate-900: #0f172a; --slate-800: #1e293b; --slate-700: #334155;
+      --slate-400: #94a3b8; --slate-300: #cbd5e1; --slate-100: #f1f5f9;
+      --green: #22c55e; --red: #ef4444; --amber: #f59e0b; --white: #fff;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--slate-900); color: var(--slate-100); min-height: 100vh; }
+    .header { background: linear-gradient(135deg, var(--purple-dark), var(--slate-800)); padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .header h1 { font-size: 20px; font-weight: 700; }
+    .header-sub { font-size: 12px; color: var(--purple-light); }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+
+    /* Stats cards */
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .stat-card { background: var(--slate-800); border: 1px solid var(--slate-700); border-radius: 10px; padding: 16px; }
+    .stat-card .number { font-size: 28px; font-weight: 800; color: var(--purple-light); }
+    .stat-card .label { font-size: 12px; color: var(--slate-400); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--slate-700); padding-bottom: 8px; }
+    .tab { padding: 8px 16px; border-radius: 8px 8px 0 0; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--slate-400); background: none; border: none; }
+    .tab.active { color: var(--purple-light); background: var(--slate-800); }
+
+    /* Toolbar */
+    .toolbar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+    .toolbar select, .toolbar input { padding: 8px 12px; border-radius: 8px; background: var(--slate-800); border: 1px solid var(--slate-700); color: var(--slate-100); font-size: 13px; }
+    .toolbar select { cursor: pointer; }
+
+    /* Table */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; padding: 10px 12px; color: var(--slate-400); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--slate-700); }
+    td { padding: 10px 12px; border-bottom: 1px solid var(--slate-700); vertical-align: top; }
+    tr:hover { background: rgba(124,58,237,0.05); }
+
+    /* Badges */
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+    .badge-pending { background: rgba(245,158,11,0.15); color: var(--amber); }
+    .badge-approved { background: rgba(34,197,94,0.15); color: var(--green); }
+    .badge-rejected { background: rgba(239,68,68,0.15); color: var(--red); }
+
+    /* Buttons */
+    .btn { padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; border: none; transition: opacity 0.15s; }
+    .btn:hover { opacity: 0.85; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-approve { background: var(--green); color: white; }
+    .btn-reject { background: var(--red); color: white; }
+    .btn-primary { background: var(--purple); color: white; }
+    .btn-sm { padding: 4px 10px; font-size: 11px; }
+
+    .actions { display: flex; gap: 6px; }
+
+    /* Toast */
+    .toast { position: fixed; bottom: 20px; right: 20px; background: var(--green); color: white; padding: 12px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; z-index: 1000; animation: slideIn 0.3s ease; }
+    .toast.error { background: var(--red); }
+    @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } }
+
+    /* Empty state */
+    .empty { text-align: center; padding: 60px 20px; color: var(--slate-400); }
+    .empty .icon { font-size: 48px; margin-bottom: 12px; }
+
+    /* City chips */
+    .city-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+    .city-chip { padding: 5px 12px; border-radius: 16px; font-size: 11px; font-weight: 600; cursor: pointer; background: var(--slate-800); border: 1px solid var(--slate-700); color: var(--slate-300); }
+    .city-chip.active { background: var(--purple); border-color: var(--purple); color: white; }
+
+    /* Loading */
+    .loading { text-align: center; padding: 40px; color: var(--slate-400); }
+    .spinner { width: 24px; height: 24px; border: 3px solid var(--slate-600); border-top-color: var(--purple); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 10px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    a { color: var(--purple-light); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>WatchParty Admin</h1>
+      <div class="header-sub">Venue & Event Management</div>
+    </div>
+    <a href="/" class="btn btn-primary">View App</a>
+  </div>
+
+  <div class="container" id="app">
+    <div class="loading"><div class="spinner"></div>Loading...</div>
+  </div>
+
+  <script>
+    const api = (path, opts) => fetch(`/api${path}`, opts).then(r => r.json());
+
+    let state = {
+      tab: 'pending',
+      cityFilter: '',
+      venues: [],
+      stats: null,
+      loading: true,
+    };
+
+    async function loadStats() {
+      const res = await api('/admin/stats');
+      state.stats = res.data;
+    }
+
+    async function loadVenues(status) {
+      state.loading = true;
+      render();
+      const cityParam = state.cityFilter ? `&city=${encodeURIComponent(state.cityFilter)}` : '';
+      const res = await api(`/admin/venues?status=${status}${cityParam}`);
+      state.venues = res.data || [];
+      state.loading = false;
+      render();
+    }
+
+    async function approveVenue(id) {
+      const res = await api(`/admin/venues/${id}/approve`, { method: 'PUT' });
+      if (res.success) {
+        showToast(`Approved: ${res.data.name}`);
+        await loadStats();
+        await loadVenues(state.tab);
+      }
+    }
+
+    async function rejectVenue(id) {
+      const res = await api(`/admin/venues/${id}/reject`, { method: 'PUT' });
+      if (res.success) {
+        showToast(`Rejected: ${res.data.name}`, true);
+        await loadStats();
+        await loadVenues(state.tab);
+      }
+    }
+
+    async function approveAll() {
+      if (!confirm('Approve all pending venues' + (state.cityFilter ? ` in ${state.cityFilter}` : '') + '?')) return;
+      const cityParam = state.cityFilter ? `?city=${encodeURIComponent(state.cityFilter)}` : '';
+      const res = await api(`/admin/venues/approve-all${cityParam}`, { method: 'PUT' });
+      if (res.success) {
+        showToast(res.message);
+        await loadStats();
+        await loadVenues(state.tab);
+      }
+    }
+
+    function showToast(msg, isError) {
+      const el = document.createElement('div');
+      el.className = 'toast' + (isError ? ' error' : '');
+      el.textContent = msg;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 3000);
+    }
+
+    function setTab(tab) {
+      state.tab = tab;
+      loadVenues(tab);
+    }
+
+    function setCity(city) {
+      state.cityFilter = city === state.cityFilter ? '' : city;
+      loadVenues(state.tab);
+    }
+
+    function render() {
+      const s = state.stats;
+      const app = document.getElementById('app');
+
+      const cities = s ? s.cities : [];
+      const pendingCount = s ? s.venues.pending : 0;
+      const approvedCount = s ? s.venues.approved : 0;
+      const rejectedCount = s ? s.venues.rejected : 0;
+
+      app.innerHTML = `
+        ${s ? `
+        <div class="stats">
+          <div class="stat-card"><div class="number">${pendingCount}</div><div class="label">Pending Review</div></div>
+          <div class="stat-card"><div class="number">${approvedCount}</div><div class="label">Approved Venues</div></div>
+          <div class="stat-card"><div class="number">${rejectedCount}</div><div class="label">Rejected</div></div>
+          <div class="stat-card"><div class="number">${s.events}</div><div class="label">Events</div></div>
+          <div class="stat-card"><div class="number">${s.rsvps}</div><div class="label">RSVPs</div></div>
+        </div>
+
+        ${cities.length > 0 ? `
+        <div class="city-chips">
+          ${cities.map(c => `<button class="city-chip ${c.city === state.cityFilter ? 'active' : ''}" onclick="setCity('${c.city}')">${c.city} (${c.count})</button>`).join('')}
+        </div>
+        ` : ''}
+        ` : ''}
+
+        <div class="tabs">
+          <button class="tab ${state.tab === 'pending' ? 'active' : ''}" onclick="setTab('pending')">Pending ${pendingCount ? `(${pendingCount})` : ''}</button>
+          <button class="tab ${state.tab === 'approved' ? 'active' : ''}" onclick="setTab('approved')">Approved</button>
+          <button class="tab ${state.tab === 'rejected' ? 'active' : ''}" onclick="setTab('rejected')">Rejected</button>
+        </div>
+
+        ${state.tab === 'pending' && state.venues.length > 0 ? `
+        <div class="toolbar">
+          <button class="btn btn-approve" onclick="approveAll()">Approve All (${state.venues.length})</button>
+        </div>
+        ` : ''}
+
+        ${state.loading ? '<div class="loading"><div class="spinner"></div>Loading venues...</div>' :
+          state.venues.length === 0 ? `<div class="empty"><div class="icon">${state.tab === 'pending' ? '✅' : '📍'}</div><p>No ${state.tab} venues${state.cityFilter ? ' in ' + state.cityFilter : ''}</p></div>` : `
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>City</th>
+                <th>Address</th>
+                <th>Source</th>
+                <th>Submitted</th>
+                ${state.tab === 'pending' ? '<th>Actions</th>' : '<th>Status</th>'}
+              </tr>
+            </thead>
+            <tbody>
+              ${state.venues.map(v => `
+              <tr>
+                <td><strong>${esc(v.name)}</strong>${v.atmosphere ? `<br><small style="color:var(--slate-400)">${esc(v.atmosphere)}</small>` : ''}</td>
+                <td>${esc(v.type)}</td>
+                <td>${esc(v.city)}</td>
+                <td><small>${esc(v.address)}</small></td>
+                <td><small>${esc(v.source || 'unknown')}</small></td>
+                <td><small>${v.created_at ? new Date(v.created_at).toLocaleDateString() : 'N/A'}</small></td>
+                ${state.tab === 'pending' ? `
+                <td class="actions">
+                  <button class="btn btn-approve btn-sm" onclick="approveVenue(${v.id})">Approve</button>
+                  <button class="btn btn-reject btn-sm" onclick="rejectVenue(${v.id})">Reject</button>
+                </td>
+                ` : `<td><span class="badge badge-${v.status}">${v.status}</span></td>`}
+              </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        `}
+      `;
+    }
+
+    function esc(s) {
+      if (!s) return '';
+      const el = document.createElement('span');
+      el.textContent = s;
+      return el.innerHTML;
+    }
+
+    // Init
+    (async () => {
+      await loadStats();
+      await loadVenues('pending');
+    })();
+  </script>
+</body>
+</html>
