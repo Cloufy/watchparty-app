@@ -314,8 +314,8 @@ async function main() {
 
       allVenues = allVenues.concat(unique);
 
-      // Rate limit: Overpass asks for 1 request per second
-      await new Promise((r) => setTimeout(r, 1500));
+      // Rate limit: Overpass needs generous delays between large queries
+      await new Promise((r) => setTimeout(r, 10000));
     } catch (err) {
       console.error(`  Error scraping ${city.name}: ${err.message}`);
     }
