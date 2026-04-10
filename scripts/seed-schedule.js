@@ -156,7 +156,7 @@ const groupMatches = [
   { home: 'AUS', away: 'TUR', time: '2026-06-14T00:00:00', ...s('bc_place'),  group: 'D' },
 
   // June 14
-  { home: 'GER', away: 'CUW', time: '2026-06-14T12:00:00', ...s('nrg'),       group: 'E' },
+  { home: 'GER', away: 'CUW', time: '2026-06-14T13:00:00', ...s('nrg'),       group: 'E' },
   { home: 'NED', away: 'JPN', time: '2026-06-14T16:00:00', ...s('att'),       group: 'F' },
   { home: 'CIV', away: 'ECU', time: '2026-06-14T19:00:00', ...s('lincoln'),   group: 'E' },
   { home: 'SWE', away: 'TUN', time: '2026-06-14T22:00:00', ...s('bbva'),      group: 'F' },
@@ -177,7 +177,7 @@ const groupMatches = [
   { home: 'POR', away: 'COD', time: '2026-06-17T13:00:00', ...s('nrg'),       group: 'K' },
   { home: 'ENG', away: 'CRO', time: '2026-06-17T16:00:00', ...s('att'),       group: 'L' },
   { home: 'GHA', away: 'PAN', time: '2026-06-17T19:00:00', ...s('bmo'),       group: 'L' },
-  { home: 'UZB', away: 'COL', time: '2026-06-17T22:00:00', ...s('azteca'),    group: 'K' },
+  { home: 'UZB', away: 'COL', time: '2026-06-17T22:00:00', ...s('azteca'),     group: 'K' },
 
   // ──── MATCHDAY 2 (June 18–23) ────
 
@@ -190,14 +190,14 @@ const groupMatches = [
   // June 19 — Groups C & D
   { home: 'USA', away: 'AUS', time: '2026-06-19T15:00:00', ...s('lumen'),     group: 'D' },
   { home: 'SCO', away: 'MAR', time: '2026-06-19T18:00:00', ...s('gillette'),  group: 'C' },
-  { home: 'BRA', away: 'HAI', time: '2026-06-19T20:30:00', ...s('lincoln'),   group: 'C' },
-  { home: 'TUR', away: 'PAR', time: '2026-06-19T23:00:00', ...s('levis'),     group: 'D' },
+  { home: 'BRA', away: 'HAI', time: '2026-06-19T21:00:00', ...s('lincoln'),   group: 'C' },
+  { home: 'TUR', away: 'PAR', time: '2026-06-19T00:00:00', ...s('levis'),     group: 'D' },
 
   // June 20 — Groups E & F
   { home: 'NED', away: 'SWE', time: '2026-06-20T13:00:00', ...s('nrg'),       group: 'F' },
   { home: 'GER', away: 'CIV', time: '2026-06-20T16:00:00', ...s('bmo'),       group: 'E' },
   { home: 'ECU', away: 'CUW', time: '2026-06-20T20:00:00', ...s('arrowhead'), group: 'E' },
-  { home: 'TUN', away: 'JPN', time: '2026-06-20T22:00:00', ...s('bbva'),      group: 'F' },
+  { home: 'TUN', away: 'JPN', time: '2026-06-20T00:00:00', ...s('bbva'),      group: 'F' },
 
   // June 21 — Groups G & H
   { home: 'ESP', away: 'SAU', time: '2026-06-21T12:00:00', ...s('mercedes'),  group: 'H' },
@@ -215,7 +215,7 @@ const groupMatches = [
   { home: 'POR', away: 'UZB', time: '2026-06-23T13:00:00', ...s('nrg'),       group: 'K' },
   { home: 'ENG', away: 'GHA', time: '2026-06-23T16:00:00', ...s('gillette'),  group: 'L' },
   { home: 'PAN', away: 'CRO', time: '2026-06-23T19:00:00', ...s('bmo'),       group: 'L' },
-  { home: 'COL', away: 'COD', time: '2026-06-23T22:00:00', ...s('azteca'),    group: 'K' },
+  { home: 'COL', away: 'COD', time: '2026-06-23T22:00:00', ...s('akron'),     group: 'K' },
 
   // ──── MATCHDAY 3 (June 24–27) ────
 
@@ -230,24 +230,24 @@ const groupMatches = [
   // June 25 — Groups D, E, F
   { home: 'ECU', away: 'GER', time: '2026-06-25T16:00:00', ...s('metlife'),   group: 'E' },
   { home: 'CUW', away: 'CIV', time: '2026-06-25T16:00:00', ...s('lincoln'),   group: 'E' },
-  { home: 'NED', away: 'TUN', time: '2026-06-25T19:00:00', ...s('att'),       group: 'F' },
-  { home: 'SWE', away: 'JPN', time: '2026-06-25T19:00:00', ...s('bbva'),      group: 'F' },
+  { home: 'NED', away: 'TUN', time: '2026-06-25T19:00:00', ...s('arrowhead'), group: 'F' },
+  { home: 'SWE', away: 'JPN', time: '2026-06-25T19:00:00', ...s('att'),       group: 'F' },
   { home: 'TUR', away: 'USA', time: '2026-06-25T22:00:00', ...s('sofi'),      group: 'D' },
   { home: 'PAR', away: 'AUS', time: '2026-06-25T22:00:00', ...s('levis'),     group: 'D' },
 
   // June 26 — Groups G, H, I
   { home: 'NOR', away: 'FRA', time: '2026-06-26T15:00:00', ...s('gillette'),  group: 'I' },
   { home: 'SEN', away: 'IRQ', time: '2026-06-26T15:00:00', ...s('bmo'),       group: 'I' },
-  { home: 'CPV', away: 'SAU', time: '2026-06-26T18:00:00', ...s('nrg'),       group: 'H' },
-  { home: 'URU', away: 'ESP', time: '2026-06-26T18:00:00', ...s('hard_rock'), group: 'H' },
-  { home: 'NZL', away: 'BEL', time: '2026-06-26T21:00:00', ...s('lumen'),     group: 'G' },
-  { home: 'EGY', away: 'IRN', time: '2026-06-26T21:00:00', ...s('sofi'),      group: 'G' },
+  { home: 'CPV', away: 'SAU', time: '2026-06-26T20:00:00', ...s('nrg'),       group: 'H' },
+  { home: 'URU', away: 'ESP', time: '2026-06-26T20:00:00', ...s('akron'),     group: 'H' },
+  { home: 'NZL', away: 'BEL', time: '2026-06-26T23:00:00', ...s('bc_place'),  group: 'G' },
+  { home: 'EGY', away: 'IRN', time: '2026-06-26T23:00:00', ...s('lumen'),     group: 'G' },
 
   // June 27 — Groups J, K, L
   { home: 'PAN', away: 'ENG', time: '2026-06-27T17:00:00', ...s('metlife'),   group: 'L' },
   { home: 'CRO', away: 'GHA', time: '2026-06-27T17:00:00', ...s('lincoln'),   group: 'L' },
   { home: 'COD', away: 'UZB', time: '2026-06-27T19:30:00', ...s('mercedes'),  group: 'K' },
-  { home: 'COL', away: 'POR', time: '2026-06-27T19:30:00', ...s('nrg'),       group: 'K' },
+  { home: 'COL', away: 'POR', time: '2026-06-27T19:30:00', ...s('hard_rock'), group: 'K' },
   { home: 'JOR', away: 'ARG', time: '2026-06-27T22:00:00', ...s('att'),       group: 'J' },
   { home: 'ALG', away: 'AUT', time: '2026-06-27T22:00:00', ...s('arrowhead'), group: 'J' },
 ];

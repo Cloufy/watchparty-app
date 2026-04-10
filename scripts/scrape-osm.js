@@ -31,7 +31,7 @@ const CITIES = {
   boston:       { name: 'Boston',       bbox: [42.30, -71.15, 42.40, -71.00] },
 };
 
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+const OVERPASS_URL = 'https://overpass.kumi.systems/api/interpreter';
 
 /**
  * Build Overpass QL query for bars/pubs in a bounding box
@@ -95,6 +95,7 @@ function fetchOverpass(query) {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Content-Length': Buffer.byteLength(postData),
+        'User-Agent': 'WatchPartyApp/1.0 (venue scraper for World Cup 2026 watch party finder)',
       },
     }, (res) => {
       let data = '';
