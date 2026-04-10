@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>List Your Venue — WatchParty</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --purple: #7c3aed; --purple-dark: #6d28d9; --purple-light: #a78bfa;
+      --slate-900: #0f172a; --slate-800: #1e293b; --slate-700: #334155;
+      --slate-400: #94a3b8; --slate-300: #cbd5e1; --slate-100: #f1f5f9;
+      --green: #22c55e; --red: #ef4444; --amber: #f59e0b; --white: #fff;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--slate-900); color: var(--slate-100); min-height: 100vh; }
+    .header { background: linear-gradient(135deg, var(--purple-dark), var(--slate-800)); padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .header h1 { font-size: 20px; font-weight: 700; }
+    .header-sub { font-size: 12px; color: var(--purple-light); }
+    .container { max-width: 640px; margin: 0 auto; padding: 20px; }
+    .btn { padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: opacity 0.15s; text-decoration: none; display: inline-block; }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary { background: var(--purple); color: white; }
+    .btn-lg { padding: 14px 24px; font-size: 15px; width: 100%; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 12px; font-weight: 600; color: var(--slate-300); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+    .form-group label .required { color: var(--red); }
+    .form-group input, .form-group select, .form-group textarea {
+      width: 100%; padding: 10px 14px; border-radius: 8px; background: var(--slate-800);
+      border: 1px solid var(--slate-700); color: var(--slate-100); font-size: 14px; font-family: inherit;
+    }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+      outline: none; border-color: var(--purple-light);
+    }
+    .form-group textarea { resize: vertical; min-height: 80px; }
+    .form-group .hint { font-size: 11px; color: var(--slate-400); margin-top: 4px; }
+    .form-group select { cursor: pointer; }
+
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    .checkbox-group { display: flex; align-items: center; gap: 8px; padding: 8px 0; }
+    .checkbox-group input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--purple); }
+    .checkbox-group label { font-size: 14px; color: var(--slate-100); text-transform: none; letter-spacing: 0; margin-bottom: 0; }
+
+    .section-title { font-size: 14px; font-weight: 700; color: var(--purple-light); margin: 24px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--slate-700); }
+
+    .geocode-row { display: flex; gap: 8px; }
+    .geocode-row input { flex: 1; }
+    .geocode-row .btn { white-space: nowrap; padding: 10px 16px; }
+
+    #map-preview { height: 200px; border-radius: 8px; margin-top: 8px; display: none; }
+    .coords { font-size: 11px; color: var(--slate-400); margin-top: 4px; }
+
+    .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; z-index: 1000; animation: slideIn 0.3s ease; color: white; }
+    .toast.success { background: var(--green); }
+    .toast.error { background: var(--red); }
+    @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } }
+
+    .success-card { background: var(--slate-800); border: 2px solid var(--green); border-radius: 12px; padding: 32px; text-align: center; margin-top: 24px; }
+    .success-card h2 { color: var(--green); margin-bottom: 8px; }
+    .success-card p { color: var(--slate-300); margin-bottom: 20px; }
+
+    a { color: var(--purple-light); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>List Your Venue</h1>
+      <div class="header-sub">Get your bar or restaurant on WatchParty</div>
+    </div>
+    <a href="/" class="btn btn-primary">Back to App</a>
+  </div>
+
+  <div class="container" id="app">
+    <p style="color: var(--slate-300); margin-bottom: 20px; font-size: 14px;">
+      Are you a bar, restaurant, or fan zone showing World Cup 2026 matches? List your venue and reach thousands of fans looking for a place to watch.
+    </p>
+
+    <form id="venue-form" onsubmit="submitVenue(event)">
+      <div class="section-title">Basic Information</div>
+
+      <div class="form-group">
+        <label>Venue Name <span class="required">*</span></label>
+        <input type="text" id="name" required placeholder="e.g. The Sports Corner">
+      </div>
+
+      <div class="form-group">
+        <label>Venue Type <span class="required">*</span></label>
+        <select id="type" required>
+          <option value="">Select type...</option>
+          <option value="bar">Bar / Sports Bar</option>
+          <option value="restaurant">Restaurant</option>
+          <option value="fan_zone">Fan Zone</option>
+          <option value="outdoor">Outdoor / Beer Garden</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Address <span class="required">*</span></label>
+        <div class="geocode-row">
+          <input type="text" id="address" required placeholder="123 Main St, Miami, FL">
+          <button type="button" class="btn btn-primary" onclick="geocodeAddress()">Look Up</button>
+        </div>
+        <div class="hint">Enter the full address and click "Look Up" to find it on the map</div>
+        <div id="map-preview"></div>
+        <div class="coords" id="coords-display"></div>
+      </div>
+
+      <div class="form-group">
+        <label>City <span class="required">*</span></label>
+        <input type="text" id="city" required placeholder="Miami">
+      </div>
+
+      <input type="hidden" id="lat">
+      <input type="hidden" id="lng">
+
+      <div class="section-title">Contact & Details</div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Phone</label>
+          <input type="tel" id="phone" placeholder="+1 (305) 555-0100">
+        </div>
+        <div class="form-group">
+          <label>Website</label>
+          <input type="url" id="website" placeholder="https://...">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Description</label>
+        <textarea id="description" placeholder="Tell fans about your venue — what makes it a great place to watch the World Cup?"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Atmosphere Tags</label>
+        <input type="text" id="atmosphere" placeholder="Sports, Outdoor Seating, Craft Beer, Family Friendly">
+        <div class="hint">Comma-separated tags that describe the vibe</div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Capacity</label>
+          <input type="number" id="capacity" placeholder="100" min="1">
+        </div>
+        <div class="form-group">
+          <label>Image URL</label>
+          <input type="url" id="image_url" placeholder="https://...">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Drink Specials</label>
+        <textarea id="drink_specials" placeholder="$5 beers during matches, 2-for-1 margaritas..." style="min-height: 60px;"></textarea>
+      </div>
+
+      <div class="form-group">
+        <div class="checkbox-group">
+          <input type="checkbox" id="has_outdoor">
+          <label for="has_outdoor">Outdoor seating available</label>
+        </div>
+        <div class="checkbox-group">
+          <input type="checkbox" id="has_food" checked>
+          <label for="has_food">Serves food</label>
+        </div>
+      </div>
+
+      <div class="section-title">Your Info</div>
+
+      <div class="form-group">
+        <label>Your Name</label>
+        <input type="text" id="submitted_by" placeholder="Name or business contact">
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-lg" id="submit-btn">Submit Venue</button>
+    </form>
+  </div>
+
+  <script>
+    let map, marker;
+
+    async function geocodeAddress() {
+      const address = document.getElementById('address').value.trim();
+      if (!address) return showToast('Enter an address first', true);
+
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&countrycodes=us&limit=1`);
+        const data = await res.json();
+        if (!data.length) return showToast('Address not found — try a more specific address', true);
+
+        const { lat, lon, display_name } = data[0];
+        document.getElementById('lat').value = lat;
+        document.getElementById('lng').value = lon;
+        document.getElementById('coords-display').textContent = `Found: ${display_name}`;
+
+        // Auto-fill city from display_name
+        const parts = display_name.split(', ');
+        const cityField = document.getElementById('city');
+        if (!cityField.value && parts.length >= 3) {
+          cityField.value = parts[parts.length - 4] || parts[parts.length - 3] || '';
+        }
+
+        // Show map
+        const mapEl = document.getElementById('map-preview');
+        mapEl.style.display = 'block';
+        if (!map) {
+          map = L.map('map-preview').setView([lat, lon], 16);
+          L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+          }).addTo(map);
+          marker = L.marker([lat, lon]).addTo(map);
+        } else {
+          map.setView([lat, lon], 16);
+          marker.setLatLng([lat, lon]);
+        }
+        setTimeout(() => map.invalidateSize(), 100);
+      } catch (e) {
+        showToast('Geocoding failed — check your connection', true);
+      }
+    }
+
+    async function submitVenue(e) {
+      e.preventDefault();
+      const lat = document.getElementById('lat').value;
+      const lng = document.getElementById('lng').value;
+      if (!lat || !lng) return showToast('Click "Look Up" to geocode your address first', true);
+
+      const btn = document.getElementById('submit-btn');
+      btn.disabled = true;
+      btn.textContent = 'Submitting...';
+
+      const body = {
+        name: document.getElementById('name').value.trim(),
+        type: document.getElementById('type').value,
+        address: document.getElementById('address').value.trim(),
+        city: document.getElementById('city').value.trim(),
+        lat: parseFloat(lat),
+        lng: parseFloat(lng),
+        phone: document.getElementById('phone').value.trim() || null,
+        website: document.getElementById('website').value.trim() || null,
+        description: document.getElementById('description').value.trim() || null,
+        atmosphere: document.getElementById('atmosphere').value.trim() || null,
+        capacity: document.getElementById('capacity').value ? parseInt(document.getElementById('capacity').value) : null,
+        has_outdoor: document.getElementById('has_outdoor').checked,
+        has_food: document.getElementById('has_food').checked,
+        drink_specials: document.getElementById('drink_specials').value.trim() || null,
+        image_url: document.getElementById('image_url').value.trim() || null,
+        submitted_by: document.getElementById('submitted_by').value.trim() || null,
+        source: 'user',
+      };
+
+      try {
+        const res = await fetch('/api/venues', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          document.getElementById('app').innerHTML = `
+            <div class="success-card">
+              <h2>Venue Submitted!</h2>
+              <p>${body.name} has been submitted for review. Our team will approve it shortly and it will appear on the map.</p>
+              <a href="/list-your-venue" class="btn btn-primary">Submit Another Venue</a>
+              <br><br>
+              <a href="/">Back to WatchParty</a>
+            </div>
+          `;
+        } else {
+          showToast(data.error || 'Submission failed', true);
+          btn.disabled = false;
+          btn.textContent = 'Submit Venue';
+        }
+      } catch (err) {
+        showToast('Network error — please try again', true);
+        btn.disabled = false;
+        btn.textContent = 'Submit Venue';
+      }
+    }
+
+    function showToast(msg, isError) {
+      const el = document.createElement('div');
+      el.className = 'toast ' + (isError ? 'error' : 'success');
+      el.textContent = msg;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 3500);
+    }
+  </script>
+</body>
+</html>

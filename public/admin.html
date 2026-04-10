@@ -104,6 +104,9 @@
       venues: [],
       stats: null,
       loading: true,
+      claims: [],
+      knockoutMatches: [],
+      teams: [],
     };
 
     async function loadStats() {
@@ -160,7 +163,57 @@
 
     function setTab(tab) {
       state.tab = tab;
+      if (tab === 'claims') { loadClaims(); return; }
+      if (tab === 'matches') { loadKnockoutMatches(); return; }
       loadVenues(tab);
+    }
+
+    async function loadClaims() {
+      state.loading = true;
+      render();
+      try {
+        const res = await api('/admin/claims');
+        state.claims = res.data || [];
+      } catch (e) { state.claims = []; }
+      state.loading = false;
+      render();
+    }
+
+    async function approveClaim(venueId) {
+      const res = await api(`/admin/venues/${venueId}/approve-claim`, { method: 'PUT' });
+      if (res.success) { showToast('Claim approved'); loadClaims(); }
+      else showToast(res.error || 'Failed', true);
+    }
+
+    async function rejectClaim(venueId) {
+      const res = await api(`/admin/venues/${venueId}/reject-claim`, { method: 'PUT' });
+      if (res.success) { showToast('Claim rejected'); loadClaims(); }
+      else showToast(res.error || 'Failed', true);
+    }
+
+    async function loadKnockoutMatches() {
+      state.loading = true;
+      render();
+      try {
+        const [matchRes, teamRes] = await Promise.all([api('/matches'), api('/teams')]);
+        const allMatches = matchRes.data || matchRes || [];
+        state.knockoutMatches = allMatches.filter(m => m.stage !== 'group');
+        state.teams = teamRes.data || teamRes || [];
+      } catch (e) { state.knockoutMatches = []; state.teams = []; }
+      state.loading = false;
+      render();
+    }
+
+    async function updateMatch(matchId) {
+      const home = document.getElementById(`home-${matchId}`).value;
+      const away = document.getElementById(`away-${matchId}`).value;
+      const body = {};
+      if (home) body.home_team_code = home;
+      if (away) body.away_team_code = away;
+      if (!Object.keys(body).length) return showToast('Select at least one team', true);
+      const res = await api(`/admin/matches/${matchId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (res.success) { showToast('Match updated'); loadKnockoutMatches(); }
+      else showToast(res.error || 'Update failed', true);
     }
 
     function setCity(city) {
@@ -198,8 +251,17 @@
           <button class="tab ${state.tab === 'pending' ? 'active' : ''}" onclick="setTab('pending')">Pending ${pendingCount ? `(${pendingCount})` : ''}</button>
           <button class="tab ${state.tab === 'approved' ? 'active' : ''}" onclick="setTab('approved')">Approved</button>
           <button class="tab ${state.tab === 'rejected' ? 'active' : ''}" onclick="setTab('rejected')">Rejected</button>
+          <button class="tab ${state.tab === 'claims' ? 'active' : ''}" onclick="setTab('claims')">Claims</button>
+          <button class="tab ${state.tab === 'matches' ? 'active' : ''}" onclick="setTab('matches')">Matches</button>
         </div>
 
+        ${state.tab === 'claims' ? renderClaims() :
+          state.tab === 'matches' ? renderMatches() : renderVenuesTab()}
+      `;
+    }
+
+    function renderVenuesTab() {
+      return `
         ${state.tab === 'pending' && state.venues.length > 0 ? `
         <div class="toolbar">
           <button class="btn btn-approve" onclick="approveAll()">Approve All (${state.venues.length})</button>
@@ -241,8 +303,66 @@
             </tbody>
           </table>
         </div>
-        `}
-      `;
+        `}`;
+    }
+
+    function renderClaims() {
+      if (state.loading) return '<div class="loading"><div class="spinner"></div>Loading claims...</div>';
+      if (state.claims.length === 0) return '<div class="empty"><div class="icon">📋</div><p>No pending claims</p></div>';
+      return `
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Venue</th><th>City</th><th>Email</th><th>Claimed At</th><th>Actions</th></tr></thead>
+            <tbody>
+              ${state.claims.map(c => `
+              <tr>
+                <td><strong>${esc(c.name)}</strong></td>
+                <td>${esc(c.city)}</td>
+                <td>${esc(c.claimed_by_email)}</td>
+                <td><small>${c.claimed_at ? new Date(c.claimed_at).toLocaleDateString() : 'N/A'}</small></td>
+                <td class="actions">
+                  <button class="btn btn-approve btn-sm" onclick="approveClaim(${c.id})">Approve</button>
+                  <button class="btn btn-reject btn-sm" onclick="rejectClaim(${c.id})">Reject</button>
+                </td>
+              </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    }
+
+    function renderMatches() {
+      if (state.loading) return '<div class="loading"><div class="spinner"></div>Loading matches...</div>';
+      if (state.knockoutMatches.length === 0) return '<div class="empty"><div class="icon">⚽</div><p>No knockout matches found</p></div>';
+      const teamOpts = state.teams.map(t => `<option value="${esc(t.code)}">${t.flag || ''} ${esc(t.name)}</option>`).join('');
+      return `
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Stage</th><th>Home</th><th>Away</th><th>Kickoff</th><th>City</th><th>Update Teams</th></tr></thead>
+            <tbody>
+              ${state.knockoutMatches.map(m => `
+              <tr>
+                <td><span class="badge badge-pending">${esc(m.stage)}</span></td>
+                <td>${m.home_team_flag || ''} ${esc(m.home_team_name || 'TBD')}</td>
+                <td>${m.away_team_flag || ''} ${esc(m.away_team_name || 'TBD')}</td>
+                <td><small>${m.kickoff_time ? new Date(m.kickoff_time).toLocaleString() : 'TBD'}</small></td>
+                <td>${esc(m.city)}</td>
+                <td>
+                  <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+                    <select id="home-${m.id}" style="padding:4px 6px;border-radius:4px;background:var(--slate-800);border:1px solid var(--slate-700);color:var(--slate-100);font-size:11px;">
+                      <option value="">Home...</option>${teamOpts}
+                    </select>
+                    <select id="away-${m.id}" style="padding:4px 6px;border-radius:4px;background:var(--slate-800);border:1px solid var(--slate-700);color:var(--slate-100);font-size:11px;">
+                      <option value="">Away...</option>${teamOpts}
+                    </select>
+                    <button class="btn btn-primary btn-sm" onclick="updateMatch(${m.id})">Set</button>
+                  </div>
+                </td>
+              </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>`;
     }
 
     function esc(s) {

@@ -53,6 +53,30 @@ function useOnlineStatus() {
   return online;
 }
 
+// ─── Saved venues (localStorage) ───────────────────────────────────
+function getSavedVenues() {
+  try { return JSON.parse(localStorage.getItem('savedVenues') || '[]'); } catch { return []; }
+}
+function toggleSavedVenue(id) {
+  const saved = getSavedVenues();
+  const idx = saved.indexOf(id);
+  if (idx >= 0) saved.splice(idx, 1); else saved.push(id);
+  localStorage.setItem('savedVenues', JSON.stringify(saved));
+  return saved;
+}
+function isVenueSaved(id) { return getSavedVenues().includes(id); }
+
+// ─── Share helper ──────────────────────────────────────────────────
+function shareContent(title, text) {
+  const url = window.location.origin;
+  if (navigator.share) {
+    navigator.share({ title, text, url }).catch(() => {});
+  } else {
+    const waText = encodeURIComponent(`${text}\n${url}`);
+    window.open(`https://wa.me/?text=${waText}`, '_blank');
+  }
+}
+
 // ─── Utility ────────────────────────────────────────────────────────
 function formatDate(iso) {
   const d = new Date(iso);
@@ -192,7 +216,10 @@ function ExploreTab({ navigate }) {
 
   function getFilteredVenues() {
     let result = venues;
-    if (filter !== 'all') result = result.filter((v) => v.type === filter);
+    if (filter === 'saved') {
+      const saved = getSavedVenues();
+      result = result.filter((v) => saved.includes(v.id));
+    } else if (filter !== 'all') result = result.filter((v) => v.type === filter);
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter((v) =>
@@ -209,7 +236,7 @@ function ExploreTab({ navigate }) {
   const types = [
     { key: 'all', label: 'All' }, { key: 'bar', label: 'Bars' },
     { key: 'restaurant', label: 'Restaurants' }, { key: 'fan_zone', label: 'Fan Zones' },
-    { key: 'outdoor', label: 'Outdoor' },
+    { key: 'outdoor', label: 'Outdoor' }, { key: 'saved', label: 'Saved' },
   ];
 
   return (
@@ -236,7 +263,10 @@ function ExploreTab({ navigate }) {
           </button>
         ))}
       </div>
-      <div className="section-header">{filtered.length} venues nearby</div>
+      <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>{filtered.length} venues nearby</span>
+        <a href="/list-your-venue" style={{ fontSize: 12, color: 'var(--purple-light)' }}>+ List Your Venue</a>
+      </div>
       {loading ? (
         <div className="loading"><div className="spinner"></div>Finding venues...</div>
       ) : error ? (
@@ -343,7 +373,10 @@ function EventsTab({ navigate }) {
           </button>
         ))}
       </div>
-      <div className="section-header">{events.length} watch parties</div>
+      <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>{events.length} watch parties</span>
+        <a href="/create-event" style={{ fontSize: 12, color: 'var(--purple-light)' }}>+ Create Watch Party</a>
+      </div>
       {loading ? (
         <div className="loading"><div className="spinner"></div>Loading events...</div>
       ) : error ? (
@@ -382,15 +415,45 @@ function DetailView({ view, navigate, goBack }) {
 
 function VenueDetail({ id, navigate, goBack }) {
   const [venue, setVenue] = useState(null);
+  const [saved, setSaved] = useState(isVenueSaved(id));
+  const [claimEmail, setClaimEmail] = useState('');
+  const [showClaim, setShowClaim] = useState(false);
+  const [claimMsg, setClaimMsg] = useState('');
 
   useEffect(() => { api(`/venues/${id}`).then(setVenue); }, [id]);
+
+  const handleSave = () => { toggleSavedVenue(id); setSaved(!saved); };
+  const handleShare = () => shareContent('WatchParty', `Check out ${venue.name} on WatchParty — World Cup 2026 watch party finder!`);
+  const handleClaim = async () => {
+    if (!claimEmail.trim()) return;
+    try {
+      const res = await fetch(`/api/venues/${id}/claim`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: claimEmail.trim() }),
+      });
+      const data = await res.json();
+      setClaimMsg(data.success ? 'Claim submitted for review!' : (data.error || 'Failed'));
+      if (data.success) setShowClaim(false);
+    } catch { setClaimMsg('Network error'); }
+    setTimeout(() => setClaimMsg(''), 3000);
+  };
 
   if (!venue) return <div className="loading"><div className="spinner"></div></div>;
 
   return (
     <div>
       <div className="detail-header">
-        <button className="back-btn" onClick={goBack}><Icons.back /> Back</button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <button className="back-btn" onClick={goBack}><Icons.back /> Back</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={handleSave} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }} title={saved ? 'Unsave' : 'Save'}>
+              {saved ? '❤️' : '🤍'}
+            </button>
+            <button onClick={handleShare} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }} title="Share">
+              📤
+            </button>
+          </div>
+        </div>
         <div className="detail-title">{venue.name}</div>
         <div className="detail-subtitle">{venue.address}</div>
         <div style={{ marginTop: 8 }}>
@@ -422,6 +485,31 @@ function VenueDetail({ id, navigate, goBack }) {
         {venue.website && <div className="detail-row"><span className="label">Website</span> <a href={venue.website} style={{color:'var(--purple-light)'}}>{venue.website}</a></div>}
       </div>
 
+      {!venue.claim_status && (
+        <div className="detail-section">
+          {!showClaim ? (
+            <button onClick={() => setShowClaim(true)} style={{ background: 'none', border: '1px solid var(--slate-700)', borderRadius: 8, padding: '10px 16px', color: 'var(--purple-light)', cursor: 'pointer', fontSize: 13, width: '100%' }}>
+              Own this venue? Claim it
+            </button>
+          ) : (
+            <div>
+              <h3>Claim This Venue</h3>
+              <p style={{ fontSize: 12, color: 'var(--slate-400)', marginBottom: 8 }}>Enter your email to submit a claim. We'll verify and approve it.</p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input placeholder="your@email.com" type="email" value={claimEmail} onChange={(e) => setClaimEmail(e.target.value)}
+                  style={{ flex: 1, padding: '8px 12px', borderRadius: 8, background: 'var(--slate-800)', border: '1px solid var(--slate-700)', color: 'var(--slate-100)', fontSize: 13 }} />
+                <button onClick={handleClaim} style={{ padding: '8px 16px', borderRadius: 8, background: 'var(--purple)', color: 'white', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Submit</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {venue.claim_status === 'approved' && (
+        <div style={{ padding: '0 16px 8px' }}>
+          <span className="tag tag-green" style={{ fontSize: 11 }}>Verified venue</span>
+        </div>
+      )}
+
       {venue.events && venue.events.length > 0 && (
         <div className="detail-section">
           <h3>Upcoming Watch Parties</h3>
@@ -437,6 +525,8 @@ function VenueDetail({ id, navigate, goBack }) {
           ))}
         </div>
       )}
+
+      {claimMsg && <div className="toast">{claimMsg}</div>}
     </div>
   );
 }
@@ -523,6 +613,13 @@ function EventDetail({ id, navigate, goBack }) {
         </div>
       )}
 
+      <div style={{ display: 'flex', gap: 8, padding: '0 16px 8px' }}>
+        <button onClick={() => shareContent(event.title, `Watch party at ${event.venue_name || 'a great venue'}! ${event.kickoff_time ? formatDate(event.kickoff_time) : ''}`)}
+          style={{ flex: 1, padding: '10px 16px', borderRadius: 8, background: 'var(--slate-800)', border: '1px solid var(--slate-700)', color: 'var(--purple-light)', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+          📤 Share
+        </button>
+      </div>
+
       {!showRsvp ? (
         <button className="rsvp-btn" onClick={() => setShowRsvp(true)}>
           RSVP — I'm Going! ({event.rsvp_count} attending)
@@ -575,7 +672,7 @@ function MatchDetail({ id, navigate, goBack }) {
 
       <div className="section-header">{events.length} watch parties for this match</div>
       {events.length === 0 ? (
-        <div className="empty-state"><div className="icon">🎉</div><p>No watch parties yet — be the first!</p></div>
+        <div className="empty-state"><div className="icon">🎉</div><p>No watch parties yet — <a href="/create-event" style={{ color: 'var(--purple-light)' }}>create one!</a></p></div>
       ) : (
         events.map((e) => (
           <div className="card" key={e.id} onClick={() => navigate({ type: 'event', id: e.id })}>

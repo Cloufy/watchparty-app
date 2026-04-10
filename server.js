@@ -50,6 +50,12 @@ async function initializeDatabase() {
       try { db.run("ALTER TABLE venues ADD COLUMN source TEXT DEFAULT 'seed'"); } catch (e2) {}
       try { db.run("ALTER TABLE venues ADD COLUMN submitted_by TEXT"); } catch (e2) {}
     }
+    // Claim columns migration
+    try { db.run("SELECT claimed_by_email FROM venues LIMIT 1"); } catch (e) {
+      try { db.run("ALTER TABLE venues ADD COLUMN claimed_by_email TEXT"); } catch (e2) {}
+      try { db.run("ALTER TABLE venues ADD COLUMN claimed_at TEXT"); } catch (e2) {}
+      try { db.run("ALTER TABLE venues ADD COLUMN claim_status TEXT"); } catch (e2) {}
+    }
 
     // Create schema (includes new columns for fresh databases)
     createSchema();
@@ -124,6 +130,9 @@ function createSchema() {
       status TEXT DEFAULT 'approved',
       source TEXT DEFAULT 'seed',
       submitted_by TEXT,
+      claimed_by_email TEXT,
+      claimed_at TEXT,
+      claim_status TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -467,6 +476,28 @@ app.get('/api/venues', (req, res, next) => {
       data: venues,
       count: venues.length,
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/venues/search
+ * Search venues by name (for autocomplete)
+ */
+app.get('/api/venues/search', (req, res, next) => {
+  try {
+    const { q, limit = 10 } = req.query;
+    if (!q || q.length < 2) {
+      return res.json({ success: true, data: [], count: 0 });
+    }
+    const venues = queryAll(
+      `SELECT id, name, city, type, address FROM venues
+       WHERE status = 'approved' AND LOWER(name) LIKE '%' || LOWER(?) || '%'
+       ORDER BY name LIMIT ?`,
+      [q, parseInt(limit)]
+    );
+    res.json({ success: true, data: venues, count: venues.length });
   } catch (error) {
     next(error);
   }
@@ -1104,6 +1135,253 @@ app.put('/api/admin/venues/approve-all', (req, res, next) => {
   }
 });
 
+/**
+ * POST /api/admin/seed-schedule
+ * Bulk seed teams, matches, and auto-generate events
+ * Body: { teams: [...], matches: [...], clear_existing: true/false }
+ */
+app.post('/api/admin/seed-schedule', (req, res, next) => {
+  try {
+    const { teams, matches, events, clear_existing } = req.body;
+
+    let results = { teams_inserted: 0, matches_inserted: 0, events_inserted: 0 };
+
+    // Optionally clear existing data
+    if (clear_existing) {
+      execute('DELETE FROM rsvps');
+      execute('DELETE FROM events');
+      execute('DELETE FROM matches');
+      execute('DELETE FROM teams');
+      console.log('Cleared existing teams, matches, events, rsvps');
+    }
+
+    // Insert teams (use INSERT OR IGNORE to preserve existing IDs)
+    if (teams && teams.length > 0) {
+      teams.forEach(t => {
+        try {
+          // Try insert first; if code exists, update in place (preserving id)
+          const existing = queryOne('SELECT id FROM teams WHERE code = ?', [t.code]);
+          if (existing) {
+            execute(
+              'UPDATE teams SET name = ?, group_name = ?, flag_emoji = ? WHERE code = ?',
+              [t.name, t.group_name, t.flag_emoji, t.code]
+            );
+          } else {
+            execute(
+              'INSERT INTO teams (name, code, group_name, flag_emoji) VALUES (?, ?, ?, ?)',
+              [t.name, t.code, t.group_name, t.flag_emoji]
+            );
+          }
+          results.teams_inserted++;
+        } catch (e) {
+          console.warn(`Team insert error (${t.code}): ${e.message}`);
+        }
+      });
+    }
+
+    // Build team lookup by code
+    const allTeams = queryAll('SELECT id, code FROM teams');
+    const teamByCode = {};
+    allTeams.forEach(t => { teamByCode[t.code] = t.id; });
+
+    // Insert matches
+    if (matches && matches.length > 0) {
+      matches.forEach(m => {
+        const homeId = teamByCode[m.home_team_code] || m.home_team_id;
+        const awayId = teamByCode[m.away_team_code] || m.away_team_id;
+        if (!homeId || !awayId) {
+          console.warn(`Skipping match: unknown team code ${m.home_team_code} or ${m.away_team_code}`);
+          return;
+        }
+        try {
+          execute(
+            'INSERT INTO matches (home_team_id, away_team_id, kickoff_time, stadium, city, stage, group_name) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [homeId, awayId, m.kickoff_time, m.stadium, m.city, m.stage, m.group_name || null]
+          );
+          results.matches_inserted++;
+        } catch (e) {
+          console.warn(`Match insert error: ${e.message}`);
+        }
+      });
+    }
+
+    // Insert events
+    if (events && events.length > 0) {
+      events.forEach(e => {
+        try {
+          execute(
+            `INSERT INTO events (venue_id, match_id, title, description, team_affiliation, organizer_name, max_capacity, rsvp_count, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)`,
+            [e.venue_id, e.match_id || null, e.title, e.description || null, e.team_affiliation || null, e.organizer_name, e.max_capacity || null]
+          );
+          results.events_inserted++;
+        } catch (e2) {
+          console.warn(`Event insert error: ${e2.message}`);
+        }
+      });
+    }
+
+    saveDatabase();
+
+    res.json({
+      success: true,
+      message: 'Schedule seeded successfully',
+      data: results,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ==================== VENUE CLAIMS ====================
+
+/**
+ * POST /api/venues/:id/claim
+ * Submit a claim request for a venue
+ */
+app.post('/api/venues/:id/claim', (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, error: 'Email is required' });
+
+    const venue = queryOne('SELECT id, name, claimed_by_email, claim_status FROM venues WHERE id = ?', [id]);
+    if (!venue) return res.status(404).json({ success: false, error: 'Venue not found' });
+    if (venue.claim_status === 'approved') return res.status(400).json({ success: false, error: 'Venue is already claimed' });
+    if (venue.claim_status === 'pending') return res.status(400).json({ success: false, error: 'A claim is already pending for this venue' });
+
+    execute("UPDATE venues SET claimed_by_email = ?, claimed_at = CURRENT_TIMESTAMP, claim_status = 'pending' WHERE id = ?", [email, id]);
+    saveDatabase();
+    res.json({ success: true, message: `Claim submitted for ${venue.name}` });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PUT /api/venues/:id/claim-edit
+ * Edit a claimed venue (owner must match email)
+ */
+app.put('/api/venues/:id/claim-edit', (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { email, ...fields } = req.body;
+    if (!email) return res.status(400).json({ success: false, error: 'Email is required' });
+
+    const venue = queryOne('SELECT * FROM venues WHERE id = ?', [id]);
+    if (!venue) return res.status(404).json({ success: false, error: 'Venue not found' });
+    if (venue.claim_status !== 'approved' || venue.claimed_by_email !== email) {
+      return res.status(403).json({ success: false, error: 'Not authorized to edit this venue' });
+    }
+
+    const allowed = ['phone', 'website', 'description', 'atmosphere', 'capacity', 'has_outdoor', 'has_food', 'drink_specials', 'image_url'];
+    const updates = [];
+    const params = [];
+    for (const [key, val] of Object.entries(fields)) {
+      if (allowed.includes(key) && val !== undefined) {
+        updates.push(`${key} = ?`);
+        params.push(key === 'capacity' ? parseInt(val) : (key === 'has_outdoor' || key === 'has_food' ? (val ? 1 : 0) : val));
+      }
+    }
+    if (updates.length === 0) return res.status(400).json({ success: false, error: 'No valid fields to update' });
+
+    params.push(id);
+    execute(`UPDATE venues SET ${updates.join(', ')} WHERE id = ?`, params);
+    saveDatabase();
+    res.json({ success: true, message: 'Venue updated' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/admin/claims
+ * List pending venue claims
+ */
+app.get('/api/admin/claims', (req, res, next) => {
+  try {
+    const claims = queryAll(
+      "SELECT id, name, city, type, address, claimed_by_email, claimed_at, claim_status FROM venues WHERE claim_status = 'pending' ORDER BY claimed_at DESC"
+    );
+    res.json({ success: true, data: claims, count: claims.length });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PUT /api/admin/venues/:id/approve-claim
+ */
+app.put('/api/admin/venues/:id/approve-claim', (req, res, next) => {
+  try {
+    const { id } = req.params;
+    execute("UPDATE venues SET claim_status = 'approved' WHERE id = ?", [id]);
+    saveDatabase();
+    res.json({ success: true, message: 'Claim approved' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PUT /api/admin/venues/:id/reject-claim
+ */
+app.put('/api/admin/venues/:id/reject-claim', (req, res, next) => {
+  try {
+    const { id } = req.params;
+    execute("UPDATE venues SET claim_status = 'rejected', claimed_by_email = NULL WHERE id = ?", [id]);
+    saveDatabase();
+    res.json({ success: true, message: 'Claim rejected' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ==================== MATCH MANAGEMENT ====================
+
+/**
+ * PUT /api/admin/matches/:id
+ * Update match details (for knockout round team assignments and time corrections)
+ */
+app.put('/api/admin/matches/:id', (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const match = queryOne('SELECT * FROM matches WHERE id = ?', [id]);
+    if (!match) return res.status(404).json({ success: false, error: 'Match not found' });
+
+    const updates = [];
+    const params = [];
+
+    if (req.body.home_team_code) {
+      const team = queryOne('SELECT id FROM teams WHERE code = ?', [req.body.home_team_code]);
+      if (!team) return res.status(400).json({ success: false, error: `Team ${req.body.home_team_code} not found` });
+      updates.push('home_team_id = ?');
+      params.push(team.id);
+    }
+    if (req.body.away_team_code) {
+      const team = queryOne('SELECT id FROM teams WHERE code = ?', [req.body.away_team_code]);
+      if (!team) return res.status(400).json({ success: false, error: `Team ${req.body.away_team_code} not found` });
+      updates.push('away_team_id = ?');
+      params.push(team.id);
+    }
+    for (const field of ['kickoff_time', 'stadium', 'city', 'stage', 'group_name']) {
+      if (req.body[field] !== undefined) {
+        updates.push(`${field} = ?`);
+        params.push(req.body[field]);
+      }
+    }
+
+    if (updates.length === 0) return res.status(400).json({ success: false, error: 'No fields to update' });
+
+    params.push(id);
+    execute(`UPDATE matches SET ${updates.join(', ')} WHERE id = ?`, params);
+    saveDatabase();
+    res.json({ success: true, message: 'Match updated' });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ==================== HEALTH CHECK ====================
 
 /**
@@ -1121,6 +1399,12 @@ app.get('/health', (req, res) => {
 
 app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+app.get('/list-your-venue', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'list-your-venue.html'));
+});
+app.get('/create-event', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'create-event.html'));
 });
 
 // ==================== SPA FALLBACK ====================

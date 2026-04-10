@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Create Watch Party — WatchParty</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --purple: #7c3aed; --purple-dark: #6d28d9; --purple-light: #a78bfa;
+      --slate-900: #0f172a; --slate-800: #1e293b; --slate-700: #334155;
+      --slate-400: #94a3b8; --slate-300: #cbd5e1; --slate-100: #f1f5f9;
+      --green: #22c55e; --red: #ef4444; --amber: #f59e0b; --white: #fff;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--slate-900); color: var(--slate-100); min-height: 100vh; }
+    .header { background: linear-gradient(135deg, var(--purple-dark), var(--slate-800)); padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .header h1 { font-size: 20px; font-weight: 700; }
+    .header-sub { font-size: 12px; color: var(--purple-light); }
+    .container { max-width: 640px; margin: 0 auto; padding: 20px; }
+    .btn { padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: opacity 0.15s; text-decoration: none; display: inline-block; }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary { background: var(--purple); color: white; }
+    .btn-lg { padding: 14px 24px; font-size: 15px; width: 100%; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 12px; font-weight: 600; color: var(--slate-300); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+    .form-group label .required { color: var(--red); }
+    .form-group input, .form-group select, .form-group textarea {
+      width: 100%; padding: 10px 14px; border-radius: 8px; background: var(--slate-800);
+      border: 1px solid var(--slate-700); color: var(--slate-100); font-size: 14px; font-family: inherit;
+    }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+      outline: none; border-color: var(--purple-light);
+    }
+    .form-group textarea { resize: vertical; min-height: 80px; }
+    .form-group .hint { font-size: 11px; color: var(--slate-400); margin-top: 4px; }
+
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .section-title { font-size: 14px; font-weight: 700; color: var(--purple-light); margin: 24px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--slate-700); }
+
+    /* Autocomplete */
+    .autocomplete-wrap { position: relative; }
+    .autocomplete-list { position: absolute; top: 100%; left: 0; right: 0; background: var(--slate-800); border: 1px solid var(--slate-700); border-radius: 0 0 8px 8px; max-height: 200px; overflow-y: auto; z-index: 10; display: none; }
+    .autocomplete-item { padding: 10px 14px; cursor: pointer; font-size: 13px; border-bottom: 1px solid var(--slate-700); }
+    .autocomplete-item:hover { background: var(--slate-700); }
+    .autocomplete-item .venue-city { color: var(--slate-400); font-size: 11px; }
+
+    .selected-venue { background: var(--slate-800); border: 1px solid var(--green); border-radius: 8px; padding: 12px; margin-top: 8px; display: none; }
+    .selected-venue .name { font-weight: 600; color: var(--green); }
+    .selected-venue .detail { font-size: 12px; color: var(--slate-400); }
+    .selected-venue .clear { color: var(--red); cursor: pointer; font-size: 12px; float: right; }
+
+    .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; z-index: 1000; animation: slideIn 0.3s ease; color: white; }
+    .toast.success { background: var(--green); }
+    .toast.error { background: var(--red); }
+    @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } }
+
+    .success-card { background: var(--slate-800); border: 2px solid var(--green); border-radius: 12px; padding: 32px; text-align: center; margin-top: 24px; }
+    .success-card h2 { color: var(--green); margin-bottom: 8px; }
+    .success-card p { color: var(--slate-300); margin-bottom: 20px; }
+
+    a { color: var(--purple-light); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>Create Watch Party</h1>
+      <div class="header-sub">Organize a World Cup viewing event</div>
+    </div>
+    <a href="/" class="btn btn-primary">Back to App</a>
+  </div>
+
+  <div class="container" id="app">
+    <p style="color: var(--slate-300); margin-bottom: 20px; font-size: 14px;">
+      Hosting a watch party at your favorite bar or venue? Create an event so other fans can find it and RSVP.
+    </p>
+
+    <form id="event-form" onsubmit="submitEvent(event)">
+      <div class="section-title">Venue</div>
+
+      <div class="form-group">
+        <label>Select a Venue <span class="required">*</span></label>
+        <div class="autocomplete-wrap">
+          <input type="text" id="venue-search" placeholder="Search for a bar or restaurant..." autocomplete="off" oninput="searchVenues(this.value)">
+          <div class="autocomplete-list" id="venue-list"></div>
+        </div>
+        <div class="selected-venue" id="selected-venue">
+          <span class="clear" onclick="clearVenue()">&times; Change</span>
+          <div class="name" id="selected-name"></div>
+          <div class="detail" id="selected-detail"></div>
+        </div>
+        <input type="hidden" id="venue_id">
+        <div class="hint">Start typing to search approved venues</div>
+      </div>
+
+      <div class="section-title">Match (Optional)</div>
+
+      <div class="form-group">
+        <label>Link to a Match</label>
+        <select id="match_id">
+          <option value="">No specific match — general viewing</option>
+        </select>
+        <div class="hint">Select a match to let fans know which game you're watching</div>
+      </div>
+
+      <div class="section-title">Event Details</div>
+
+      <div class="form-group">
+        <label>Event Title <span class="required">*</span></label>
+        <input type="text" id="title" required placeholder="e.g. USA vs Mexico Watch Party">
+      </div>
+
+      <div class="form-group">
+        <label>Organizer Name <span class="required">*</span></label>
+        <input type="text" id="organizer_name" required placeholder="Your name or group name">
+      </div>
+
+      <div class="form-group">
+        <label>Description</label>
+        <textarea id="description" placeholder="Tell fans what to expect — drink specials, fan gear, reserved area, etc."></textarea>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Team Affiliation</label>
+          <input type="text" id="team_affiliation" placeholder="e.g. USA, Mexico">
+        </div>
+        <div class="form-group">
+          <label>Max Capacity</label>
+          <input type="number" id="max_capacity" placeholder="50" min="1">
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-lg" id="submit-btn">Create Watch Party</button>
+    </form>
+  </div>
+
+  <script>
+    let searchTimeout;
+    let selectedVenueId = null;
+
+    // Load matches on page load
+    (async () => {
+      try {
+        const res = await fetch('/api/matches');
+        const data = await res.json();
+        const matches = (data.data || data || []).filter(m => new Date(m.kickoff_time) > new Date());
+        const select = document.getElementById('match_id');
+        matches.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m.id;
+          const date = new Date(m.kickoff_time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          const time = new Date(m.kickoff_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+          opt.textContent = `${m.home_team_flag || ''} ${m.home_team_name} vs ${m.away_team_name} ${m.away_team_flag || ''} — ${date} ${time} (${m.city})`;
+          select.appendChild(opt);
+        });
+      } catch (e) {}
+    })();
+
+    function searchVenues(q) {
+      clearTimeout(searchTimeout);
+      const list = document.getElementById('venue-list');
+      if (q.length < 2) { list.style.display = 'none'; return; }
+
+      searchTimeout = setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/venues/search?q=${encodeURIComponent(q)}&limit=8`);
+          const data = await res.json();
+          const venues = data.data || [];
+          if (venues.length === 0) {
+            list.innerHTML = '<div class="autocomplete-item"><span style="color:var(--slate-400)">No venues found</span></div>';
+          } else {
+            list.innerHTML = venues.map(v =>
+              `<div class="autocomplete-item" onclick="selectVenue(${v.id}, '${esc(v.name)}', '${esc(v.type)} in ${esc(v.city)}')">
+                <div>${esc(v.name)}</div>
+                <div class="venue-city">${esc(v.type)} — ${esc(v.city)}</div>
+              </div>`
+            ).join('');
+          }
+          list.style.display = 'block';
+        } catch (e) {
+          list.style.display = 'none';
+        }
+      }, 300);
+    }
+
+    function selectVenue(id, name, detail) {
+      selectedVenueId = id;
+      document.getElementById('venue_id').value = id;
+      document.getElementById('venue-search').style.display = 'none';
+      document.getElementById('venue-list').style.display = 'none';
+      document.getElementById('selected-name').textContent = name;
+      document.getElementById('selected-detail').textContent = detail;
+      document.getElementById('selected-venue').style.display = 'block';
+    }
+
+    function clearVenue() {
+      selectedVenueId = null;
+      document.getElementById('venue_id').value = '';
+      document.getElementById('venue-search').value = '';
+      document.getElementById('venue-search').style.display = 'block';
+      document.getElementById('selected-venue').style.display = 'none';
+    }
+
+    async function submitEvent(e) {
+      e.preventDefault();
+      if (!document.getElementById('venue_id').value) return showToast('Please select a venue first', true);
+
+      const btn = document.getElementById('submit-btn');
+      btn.disabled = true;
+      btn.textContent = 'Creating...';
+
+      const body = {
+        venue_id: parseInt(document.getElementById('venue_id').value),
+        title: document.getElementById('title').value.trim(),
+        organizer_name: document.getElementById('organizer_name').value.trim(),
+        description: document.getElementById('description').value.trim() || null,
+        team_affiliation: document.getElementById('team_affiliation').value.trim() || null,
+        max_capacity: document.getElementById('max_capacity').value ? parseInt(document.getElementById('max_capacity').value) : null,
+      };
+      const matchId = document.getElementById('match_id').value;
+      if (matchId) body.match_id = parseInt(matchId);
+
+      try {
+        const res = await fetch('/api/events', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          document.getElementById('app').innerHTML = `
+            <div class="success-card">
+              <h2>Watch Party Created!</h2>
+              <p>"${esc(body.title)}" is now live. Fans can find it and RSVP through the WatchParty app.</p>
+              <a href="/create-event" class="btn btn-primary">Create Another Event</a>
+              <br><br>
+              <a href="/">Back to WatchParty</a>
+            </div>
+          `;
+        } else {
+          showToast(data.error || 'Creation failed', true);
+          btn.disabled = false;
+          btn.textContent = 'Create Watch Party';
+        }
+      } catch (err) {
+        showToast('Network error — please try again', true);
+        btn.disabled = false;
+        btn.textContent = 'Create Watch Party';
+      }
+    }
+
+    function showToast(msg, isError) {
+      const el = document.createElement('div');
+      el.className = 'toast ' + (isError ? 'error' : 'success');
+      el.textContent = msg;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 3500);
+    }
+
+    function esc(s) {
+      if (!s) return '';
+      const el = document.createElement('span');
+      el.textContent = s;
+      return el.innerHTML;
+    }
+
+    // Close autocomplete on click outside
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.autocomplete-wrap')) {
+        document.getElementById('venue-list').style.display = 'none';
+      }
+    });
+  </script>
+</body>
+</html>

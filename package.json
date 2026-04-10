@@ -7,7 +7,8 @@
     "start": "node server.js",
     "seed": "node seed.js",
     "scrape:osm": "node scripts/scrape-osm.js",
-    "scrape:google": "node scripts/scrape-google.js"
+    "scrape:google": "node scripts/scrape-google.js",
+    "seed:schedule": "node scripts/seed-schedule.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
