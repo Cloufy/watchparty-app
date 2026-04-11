@@ -66,11 +66,24 @@ function toggleSavedVenue(id) {
 }
 function isVenueSaved(id) { return getSavedVenues().includes(id); }
 
+// ─── HTML escape helper ───────────────────────────────────────────
+function escHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 // ─── Share helper ──────────────────────────────────────────────────
 function shareContent(title, text) {
   const url = window.location.origin;
   if (navigator.share) {
     navigator.share({ title, text, url }).catch(() => {});
+  } else if (navigator.clipboard) {
+    navigator.clipboard.writeText(`${text}\n${url}`).then(() => {
+      const el = document.createElement('div');
+      el.className = 'toast'; el.textContent = 'Link copied!';
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 2500);
+    }).catch(() => {});
   } else {
     const waText = encodeURIComponent(`${text}\n${url}`);
     window.open(`https://wa.me/?text=${waText}`, '_blank');
@@ -208,7 +221,7 @@ function ExploreTab({ navigate }) {
       });
       const marker = L.marker([v.lat, v.lng], { icon })
         .addTo(mapInstance.current)
-        .bindPopup(`<b>${v.name}</b><br><small>${v.type}</small>`);
+        .bindPopup(`<b>${escHtml(v.name)}</b><br><small>${escHtml(v.type)}</small>`);
       marker.on('click', () => navigate({ type: 'venue', id: v.id }));
       markersRef.current.push(marker);
     });
@@ -433,7 +446,7 @@ function VenueDetail({ id, navigate, goBack }) {
       });
       const data = await res.json();
       setClaimMsg(data.success ? 'Claim submitted for review!' : (data.error || 'Failed'));
-      if (data.success) setShowClaim(false);
+      if (data.success) { setShowClaim(false); setVenue(prev => ({ ...prev, claim_status: 'pending' })); }
     } catch { setClaimMsg('Network error'); }
     setTimeout(() => setClaimMsg(''), 3000);
   };

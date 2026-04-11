@@ -202,7 +202,7 @@
         // Auto-fill city from display_name
         const parts = display_name.split(', ');
         const cityField = document.getElementById('city');
-        if (!cityField.value && parts.length >= 3) {
+        if (!cityField.value.trim() && parts.length >= 3) {
           cityField.value = parts[parts.length - 4] || parts[parts.length - 3] || '';
         }
 

@@ -9,6 +9,11 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  next();
+});
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -491,11 +496,12 @@ app.get('/api/venues/search', (req, res, next) => {
     if (!q || q.length < 2) {
       return res.json({ success: true, data: [], count: 0 });
     }
+    const validLimit = Math.min(Math.max(parseInt(limit) || 10, 1), 100);
     const venues = queryAll(
       `SELECT id, name, city, type, address FROM venues
        WHERE status = 'approved' AND LOWER(name) LIKE '%' || LOWER(?) || '%'
        ORDER BY name LIMIT ?`,
-      [q, parseInt(limit)]
+      [q, validLimit]
     );
     res.json({ success: true, data: venues, count: venues.length });
   } catch (error) {
@@ -862,7 +868,7 @@ app.post('/api/venues', (req, res, next) => {
       });
     }
 
-    const venueStatus = source === 'scraper' ? 'pending' : 'pending';
+    const venueStatus = 'pending';
 
     execute(
       `INSERT INTO venues (name, type, address, city, lat, lng, phone, website, description, atmosphere, capacity, has_outdoor, has_food, drink_specials, image_url, status, source, submitted_by, created_at)
@@ -1172,7 +1178,8 @@ app.post('/api/admin/seed-schedule', (req, res, next) => {
               [t.name, t.code, t.group_name, t.flag_emoji]
             );
           }
-          results.teams_inserted++;
+          if (existing) { results.teams_updated = (results.teams_updated || 0) + 1; }
+          else { results.teams_inserted++; }
         } catch (e) {
           console.warn(`Team insert error (${t.code}): ${e.message}`);
         }
@@ -1315,6 +1322,9 @@ app.get('/api/admin/claims', (req, res, next) => {
 app.put('/api/admin/venues/:id/approve-claim', (req, res, next) => {
   try {
     const { id } = req.params;
+    const venue = queryOne('SELECT id, claim_status FROM venues WHERE id = ?', [id]);
+    if (!venue) return res.status(404).json({ success: false, error: 'Venue not found' });
+    if (venue.claim_status !== 'pending') return res.status(400).json({ success: false, error: 'No pending claim for this venue' });
     execute("UPDATE venues SET claim_status = 'approved' WHERE id = ?", [id]);
     saveDatabase();
     res.json({ success: true, message: 'Claim approved' });
@@ -1329,6 +1339,9 @@ app.put('/api/admin/venues/:id/approve-claim', (req, res, next) => {
 app.put('/api/admin/venues/:id/reject-claim', (req, res, next) => {
   try {
     const { id } = req.params;
+    const venue = queryOne('SELECT id, claim_status FROM venues WHERE id = ?', [id]);
+    if (!venue) return res.status(404).json({ success: false, error: 'Venue not found' });
+    if (venue.claim_status !== 'pending') return res.status(400).json({ success: false, error: 'No pending claim for this venue' });
     execute("UPDATE venues SET claim_status = 'rejected', claimed_by_email = NULL WHERE id = ?", [id]);
     saveDatabase();
     res.json({ success: true, message: 'Claim rejected' });
@@ -1435,7 +1448,7 @@ async function start() {
     // Periodic database save every 60 seconds
     setInterval(() => {
       if (db) saveDatabase();
-    }, 60000);
+    }, 10000);
 
     // Start server
     app.listen(PORT, () => {

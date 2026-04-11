@@ -110,8 +110,12 @@
     };
 
     async function loadStats() {
-      const res = await api('/admin/stats');
-      state.stats = res.data;
+      try {
+        const res = await api('/admin/stats');
+        state.stats = res.data || { venues: { pending: 0, approved: 0, rejected: 0 }, events: 0, rsvps: 0, cities: [] };
+      } catch (e) {
+        state.stats = { venues: { pending: 0, approved: 0, rejected: 0 }, events: 0, rsvps: 0, cities: [] };
+      }
     }
 
     async function loadVenues(status) {
@@ -242,7 +246,7 @@
 
         ${cities.length > 0 ? `
         <div class="city-chips">
-          ${cities.map(c => `<button class="city-chip ${c.city === state.cityFilter ? 'active' : ''}" onclick="setCity('${c.city}')">${c.city} (${c.count})</button>`).join('')}
+          ${cities.map(c => `<button class="city-chip ${c.city === state.cityFilter ? 'active' : ''}" onclick="setCity('${esc(c.city)}')">${esc(c.city)} (${c.count})</button>`).join('')}
         </div>
         ` : ''}
         ` : ''}
@@ -369,7 +373,7 @@
       if (!s) return '';
       const el = document.createElement('span');
       el.textContent = s;
-      return el.innerHTML;
+      return el.innerHTML.replace(/'/g, '&#39;');
     }
 
     // Init

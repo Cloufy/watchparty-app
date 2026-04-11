@@ -266,7 +266,7 @@
       if (!s) return '';
       const el = document.createElement('span');
       el.textContent = s;
-      return el.innerHTML;
+      return el.innerHTML.replace(/'/g, '&#39;');
     }
 
     // Close autocomplete on click outside
